@@ -6,25 +6,72 @@
 #include <sys/msg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <unistd.h>
 #include <string.h>
 #include <dirent.h>
 
+#define KEY_NUM 1
 #define SHARED_MEMORY_SIZE 1024*1024
 #define MAX_CLIENT 4
 #define STR_LEN 256
 
+typedef enum { REGISTER, UNREGISTER, SEND_FAX, GET_FAX } MSG_TYPE;
+
+struct msgbuf {
+        MSG_TYPE type;
+        pid_t pid;
+};
+
+struct client_pid {
+	pid_t list[MAX_CLIENT];
+	int size;
+};
+
+void sig_handler(int signo); 
+
+
 int main() {
-	// Client PID array
-	pid_t client_pid[MAX_CLIENT];
-	// create a key for IPC
-	key_t key = ftok(".", (int)getpid());
+	void (*hand)(int);
+	struct msgbuf message;
+	struct client_pid pid_list;
+	pid_list.size = 0;
+	int qid; // message queue id to receive
+	key_t key = ftok(".", KEY_NUM); // key for IPC
+
+	hand = signal(SIGINT, sig_handler);
+	if (hand == SIG_ERR) {
+		perror("signal");
+		exit(1);
+	}
 
 	// create shared memory
 	int shmid = shmget(key, SHARED_MEMORY_SIZE, IPC_CREAT|0666);
 	void *shmaddr = shmat(shmid, NULL, 0); // will be used by listener client
 
+	// create message queue for reception
+	if ((qid = msgget(key, IPC_CREAT|0640)) < 0) {
+		perror("msgget");
+		exit(1);
+	}
+
+	int msg_len;
+	while(1) {
+		// get message
+		msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 0, 0);
+		pid_list.list[pid_list.size++] = message.pid;
+		printf("Received pid: %d, len = %d\n", 
+			pid_list.list[pid_list.size - 1], msg_len);
+		
+	}
+
+
 	return 0;
 }
 
 
+void sig_handler(int signo) {
+	printf("End server\n");
+	system("ipcrm --all"); // remove all message queues
+	exit(1);
+}
