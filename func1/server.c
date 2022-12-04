@@ -10,18 +10,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <dirent.h>
+#include "msgtype.h"
 
 #define KEY_NUM 1
 #define SHARED_MEMORY_SIZE 1024*1024
 #define MAX_CLIENT 4
 #define STR_LEN 256
 
-typedef enum { REGISTER, UNREGISTER, SEND_FAX, GET_FAX } MSG_TYPE;
-
-struct msgbuf {
-        MSG_TYPE type;
-        pid_t pid;
-};
 
 struct client_pid {
 	pid_t list[MAX_CLIENT];
@@ -55,23 +50,25 @@ int main() {
 		exit(1);
 	}
 
+	system ("ipcs -q");
 	int msg_len;
-	while(1) {
+	//while(1) {
 		// get message
-		msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 0, 0);
-		pid_list.list[pid_list.size++] = message.pid;
-		printf("Received pid: %d, len = %d\n", 
-			pid_list.list[pid_list.size - 1], msg_len);
+	msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 0, 0);
+	pid_list.list[pid_list.size++] = message.msgcontent.pid;
+	printf("Received pid: %d, len = %d\n", 
+		pid_list.list[pid_list.size - 1], msg_len);
 		
-	}
+	//}
 
-
+	system ("ipcs -q");
+	system("ipcrm --all=msg"); // remove all message queues
 	return 0;
 }
 
 
 void sig_handler(int signo) {
-	printf("End server\n");
-	system("ipcrm --all"); // remove all message queues
+	printf("\n====End server\n");
+	system("ipcrm --all=msg"); // remove all message queues
 	exit(1);
 }

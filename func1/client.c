@@ -9,25 +9,29 @@
 #include <string.h>
 #include <dirent.h>
 #include <ncurses.h>
+#include "msgtype.h"
 	
 #define KEY_NUM 1
 #define SHARED_MEMORY_SIZE 1024*1024
 #define MAX_FILE 20
 #define STR_LEN 256
 
-typedef enum { REGISTER, UNREGISTER, SEND_FAX, GET_FAX } MSG_TYPE;
-
+/*
 struct msgbuf {
-	MSG_TYPE type;
-	pid_t pid;
+	long mtype;
+	struct content msgcontent;
 };
+*/
 
 void create_msgq(int *qid); 
 void remove_msgq(int *qid); 
 void put_txt_files(WINDOW *window, DIR *dp, struct dirent **list); 
+char *getLine(WINDOW *window, char *buf, int size); 
+int get_int(WINDOW *window); 
 
 int main() {
 	int qid[2];
+	struct msgbuf message;
 	// create a key for IPC
         key_t key = ftok(".", (int)getpid());
 
@@ -45,10 +49,9 @@ int main() {
 
 	create_msgq(qid);
 
-	// send a information of this process
-	struct msgbuf message;
-	message.type = REGISTER;
-	message.pid = getpid();
+	// register in server
+	message.mtype = 2;
+	message.msgcontent = (struct content) { .type = REGISTER, .pid = getpid() };
 	if (msgsnd(qid[1], (void *)&message, 80, IPC_NOWAIT) == -1) {
 		perror("msgsnd");
 		exit(1);
@@ -60,18 +63,23 @@ int main() {
 
         DIR *dp;
         struct dirent *files[MAX_FILE]; // text file list
+	int find;
 
         // print txt files of current directory
         dp = opendir(".");
         put_txt_files(win, dp, files);
-        closedir(dp);
+	find = get_int(win);
+	wprintw(win, "Got an input %d\n", find);
 
         // print to check files
+	/*
         for (int i = 0; files[i] != NULL; i++) {
                 wprintw(win, "%d\n", (int) (*(files+i))->d_ino);
         }
+	*/
 
         wgetch(win);
+        closedir(dp);
 
 	// remove message queues
 	remove_msgq(qid); 
@@ -113,7 +121,8 @@ void put_txt_files(WINDOW *window, DIR *dp, struct dirent **list) {
         while ((dent = readdir(dp))) {
                 size = strlen(dent->d_name);
                 if (ends_txt(dent->d_name, size)) {
-                        *(list+i++) = dent;
+                        *(list+i) = dent;
+			wprintw(window, "%d ", ++i);
                         wprintw(window, "%s\n", dent->d_name);
                 }
         }
@@ -129,4 +138,18 @@ int ends_txt(char *str, int size) {
                 return 1;
         }
         return 0;
+}
+
+// get an string input from user
+char *getLine(WINDOW *window, char *buf, int size) {
+	echo();
+	wgetnstr(window, buf, size-1);
+	noecho();
+	return buf;
+}
+
+// get the input from user
+int get_int(WINDOW *window) {
+	char buf[8];
+	return atoi(getLine(window, buf, 8));
 }
