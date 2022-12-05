@@ -24,6 +24,7 @@ struct client_pid {
 };
 
 void sig_handler(int signo); 
+void delete_pid(struct client_pid *pid_list, pid_t pid); 
 
 
 int main() {
@@ -34,6 +35,7 @@ int main() {
 	int qid; // message queue id to receive
 	key_t key = ftok(".", KEY_NUM); // key for IPC
 
+	// Signal handler for Ctrl + c
 	hand = signal(SIGINT, sig_handler);
 	if (hand == SIG_ERR) {
 		perror("signal");
@@ -52,16 +54,16 @@ int main() {
 
 	system ("ipcs -q");
 	int msg_len;
-	//while(1) {
+	while(1) {
 		// get message
-	msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 0, 0);
-	pid_list.list[pid_list.size++] = message.msgcontent.pid;
-	printf("Received pid: %d, len = %d\n", 
-		pid_list.list[pid_list.size - 1], msg_len);
-		
-	//}
+		msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 1, 0);
+		if (msg_len > 0) {
+			pid_list.list[pid_list.size++] = message.msgcontent.pid;
+			printf("Received pid: %d, len = %d\n", 
+				pid_list.list[pid_list.size - 1], msg_len);
+		}
+	}
 
-	system ("ipcs -q");
 	system("ipcrm --all=msg"); // remove all message queues
 	return 0;
 }
@@ -71,4 +73,20 @@ void sig_handler(int signo) {
 	printf("\n====End server\n");
 	system("ipcrm --all=msg"); // remove all message queues
 	exit(1);
+}
+
+// delete a pid from pid list
+void delete_pid(struct client_pid *pid_list, pid_t pid) {
+	int index;
+	// find the pid index
+	for (index = 0; index < pid_list->size; index++) {
+		if (pid_list->list[index] == pid) {
+			pid_list->list[index] = NULL;
+			break;
+		}
+	}
+	while (index < pid_list->size) {
+		pid_list->list[index] = pid_list->list[index+1];
+		pid_list->list[++index] = NULL;
+	}
 }

@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <dirent.h>
-#include <ncurses.h>
+//#include <ncurses.h>
 #include "msgtype.h"
 	
 #define KEY_NUM 1
@@ -16,18 +16,14 @@
 #define MAX_FILE 20
 #define STR_LEN 256
 
-/*
-struct msgbuf {
-	long mtype;
-	struct content msgcontent;
-};
-*/
 
 void create_msgq(int *qid); 
 void remove_msgq(int *qid); 
+/*
 void put_txt_files(WINDOW *window, DIR *dp, struct dirent **list); 
 char *getLine(WINDOW *window, char *buf, int size); 
 int get_int(WINDOW *window); 
+*/
 
 int main() {
 	int qid[2];
@@ -36,6 +32,7 @@ int main() {
         key_t key = ftok(".", (int)getpid());
 
         // create a ncurses window
+	/*
         WINDOW *win;
         initscr();
         noecho();
@@ -46,13 +43,14 @@ int main() {
         // start a window
         win = newwin(yMax, xMax, 1, 1);
         wrefresh(win);
+	*/
 
 	create_msgq(qid);
 
 	// register in server
-	message.mtype = 2;
+	message.mtype = 1;
 	message.msgcontent = (struct content) { .type = REGISTER, .pid = getpid() };
-	if (msgsnd(qid[1], (void *)&message, 80, IPC_NOWAIT) == -1) {
+	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
 		perror("msgsnd");
 		exit(1);
 	}
@@ -61,6 +59,7 @@ int main() {
 
 
 
+	/*
         DIR *dp;
         struct dirent *files[MAX_FILE]; // text file list
 	int find;
@@ -71,21 +70,15 @@ int main() {
 	find = get_int(win);
 	wprintw(win, "Got an input %d\n", find);
 
-        // print to check files
-	/*
-        for (int i = 0; files[i] != NULL; i++) {
-                wprintw(win, "%d\n", (int) (*(files+i))->d_ino);
-        }
-	*/
-
         wgetch(win);
         closedir(dp);
+	*/
 
 	// remove message queues
 	remove_msgq(qid); 
 
 	// close window
-        endwin();
+        //endwin();
 
         return 0;
 }
@@ -110,6 +103,7 @@ void remove_msgq(int *qid) {
 	msgctl(qid[0], IPC_RMID, (struct msqid_ds *)NULL);
 }
 
+/*
 // print text files in the current directory and put it in inode list
 void put_txt_files(WINDOW *window, DIR *dp, struct dirent **list) {
         struct dirent *dent;
@@ -153,3 +147,4 @@ int get_int(WINDOW *window) {
 	char buf[8];
 	return atoi(getLine(window, buf, 8));
 }
+*/
