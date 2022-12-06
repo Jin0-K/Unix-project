@@ -82,7 +82,7 @@ int main(void){
 
 	/* 새로운 파일의 이름만들기 */
 
-	char str[30] = "test.txt";
+	char str[] = "test2.txt";
 
 	char* extension = (char*) malloc(sizeof(char) * strlen(str));
 	strcpy(extension, str);

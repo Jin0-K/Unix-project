@@ -1,6 +1,13 @@
+#include <signal.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+void kill_ctrl_z_handler(int signo){
+	printf("---------------------------\n");
+	printf("출력 취소\n");
+	exit(0);
+}
 
 int main(int argc, char* argv[]){
 
@@ -11,6 +18,8 @@ int main(int argc, char* argv[]){
 		printf("%s\n", argv[i]);
 	}
 	*/
+
+	signal(SIGTSTP, kill_ctrl_z_handler);
 
 	if(argc < 2){
 		perror("argc is not enough");
@@ -38,11 +47,16 @@ int main(int argc, char* argv[]){
 	}
 	*/
 
+	printf("--------------------------\n");
 	while(fgets(buf, BUFSIZ, fpin) != NULL){
 		printf("%s", buf);
 		sleep(1);
 	}
+	printf("--------------------------\n");
+	printf("출력 완료: %s\n", argv[1]);
 
-
+	//kill(getppid(), SIGUSR2);
+	
 	return 0;
 }
+
