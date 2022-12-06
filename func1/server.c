@@ -17,14 +17,16 @@
 #define MAX_CLIENT 4
 #define STR_LEN 256
 
-
 struct client_pid {
 	pid_t list[MAX_CLIENT];
+	int qid[MAX_CLIENT];
 	int size;
 };
 
 void sig_handler(int signo); 
-void delete_pid(struct client_pid *pid_list, pid_t pid); 
+int is_in(int *arr, int size, int element); 
+int add_pid(struct client_pid *pid_list, struct content message); 
+int delete_pid(struct client_pid *pid_list, struct content message); 
 
 
 int main() {
@@ -57,11 +59,38 @@ int main() {
 	while(1) {
 		// get message
 		msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 1, 0);
-		if (msg_len > 0) {
-			pid_list.list[pid_list.size++] = message.msgcontent.pid;
-			printf("Received pid: %d, len = %d\n", 
-				pid_list.list[pid_list.size - 1], msg_len);
+		if (msg_len < 0) { // if message cannot be received
+                        printf("Message cannot be received\n");
+			/* delete the message in the queue */
+                        continue;
+                }
+                else {
+                        printf("Received pid: %d, qid: %d, len = %d\n",
+                                pid_list.list[pid_list.size - 1], 
+				pid_list.qid[pid_list.size - 1],
+				msg_len);
+                }
+
+                // operation by each message type 
+                switch(message.msgcontent.type) {
+                        case REGISTER :
+				add_pid(&pid_list, message.msgcontent);
+				break;
+
+			case UNREGISTER :
+				delete_pid(&pid_list, message.msgcontent);
+				break;
+
+			case SEND_FAX :
+				break;
+
+			case GET_FAX :
+				break;
+			
+			default :
+				break;
 		}
+	
 	}
 
 	system("ipcrm --all=msg"); // remove all message queues
@@ -75,18 +104,65 @@ void sig_handler(int signo) {
 	exit(1);
 }
 
-// delete a pid from pid list
-void delete_pid(struct client_pid *pid_list, pid_t pid) {
+// check if the element is in the function
+int is_in(int *arr, int size, int element) {
+	for (int i = 0; i < size; i++) {
+		if (arr[i] == element) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// add a process in pid list
+// return the size of pid_list
+int add_pid(struct client_pid *pid_list, struct content message) {
+	static int client_key = 2;
+
+	// return -1 if the pid_list is full
+	if (pid_list->size == MAX_CLIENT) {
+		return -1;
+	}
+
+	// add pid in the list
+	pid_list->list[pid_list->size] = message.pid;
+	/* 
+	I made useless code by misunderstanding, but not gonna delete it just in case
+	// give the added pid new key num for message queue
+	do {
+		if (++client_key > 255) {
+			client_key = 2;
+		}
+	} while (is_in(pid_list->key_num, pid_list->size, client_key)); 
+	pid_list->key_num[pid_list->size] = client_key;
+	*/
+
+	// add qid in the list
+	pid_list->qid[pid_list->size] = message.qid;
+
+	return ++(pid_list->size);
+}
+
+// delete a process from pid list
+// return the size of pid_list
+int delete_pid(struct client_pid *pid_list, struct content message) {
+	// return -1 if pid_list is empty
+	if (pid_list->size < 1) {
+		return -1;
+	}
+
 	int index;
 	// find the pid index
 	for (index = 0; index < pid_list->size; index++) {
-		if (pid_list->list[index] == pid) {
-			pid_list->list[index] = NULL;
+		if (pid_list->list[index] == message.pid) {
 			break;
 		}
 	}
-	while (index < pid_list->size) {
+	while (index < (pid_list->size) - 1) {
 		pid_list->list[index] = pid_list->list[index+1];
-		pid_list->list[++index] = NULL;
+		pid_list->qid[index] = pid_list->qid[index+1];
+		index++;
 	}
+	
+	return --(pid_list->size);
 }

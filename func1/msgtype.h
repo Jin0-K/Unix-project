@@ -12,6 +12,7 @@ typedef enum
 struct content {
 	MsgType type;
 	pid_t pid;
+	int qid;
 };
 
 struct msgbuf {
