@@ -66,8 +66,8 @@ int main() {
                 }
                 else {
                         printf("Received pid: %d, qid: %d, len = %d\n",
-                                pid_list.list[pid_list.size - 1], 
-				pid_list.qid[pid_list.size - 1],
+                                message.msgcontent.pid, 
+				message.msgcontent.qid,
 				msg_len);
                 }
 

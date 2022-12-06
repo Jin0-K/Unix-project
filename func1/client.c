@@ -77,7 +77,7 @@ int main() {
 
 	// exit if user canceled
 	if (!find) {
-		wprintw(win, "Canceled");
+		wprintw(win, "Canceled\n");
 		wgetch(win);
 		endwin();
 		exit(1);
