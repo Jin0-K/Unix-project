@@ -29,6 +29,8 @@ void end_program(WINDOW *window, int *qid, struct msgbuf *message);
 int main() {
 	int qid[2];
 	struct msgbuf message;
+	message.mtype = 1; // mtype is always 1
+
 	// create a key for IPC
         key_t key = ftok(".", (int)getpid());
 
@@ -47,13 +49,12 @@ int main() {
 	create_msgq(qid);
 
 	// register in server
-	message.mtype = 1;
 	message.msgcontent = (struct content) { .type = REGISTER, 
 						.pid = getpid(),
 						.qid = qid[0] };
 	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
-		perror("msgsnd");
-		exit(1);
+		wprintw(win, "Failed to connect server\n");
+		end_program(win, qid, &message); 
 	}
 
 
@@ -79,18 +80,35 @@ int main() {
 	if (!find) {
 		wprintw(win, "Canceled\n");
 		wgetch(win);
-		endwin();
-		exit(1);
+		end_program(win, qid, &message); 
 	}
 
 	// send message to server that I will send fax
-	message.msgcontent.type = SEND_FAX;
+	message.msgcontent.type = GET_PIDS;
 	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
 		perror("msgsnd");
 		exit(1);
 	}
-	
 
+	pid_t pid_list[3]; // pid list to print
+	int ind = 0;
+	int msg_len;
+	do {
+		msg_len = msgrcv(qid[0], &message, sizeof(struct msgbuf), 1, 0);
+		if (msg_len == -1) {
+			wprintw(win, "Error: unable to receive message\n");
+			wgetch(win);
+			end_program(win, qid, &message);
+		}
+		if (message.msgcontent.type == GET_PIDS) {
+			pid_list[ind++] = message.msgcontent.pid;
+		}
+	} while(message.msgcontent.type != REGISTER);
+
+	// print the received pid list
+	for (int i = 0; i < ind; i++) {
+		wprintw(win, "%d\n", (int)(pid_list[i]));
+	}
 
 
         wgetch(win);
@@ -111,6 +129,7 @@ void create_msgq(int *qid) {
 			keynum = 2;
 		}
 	}
+
 	// message queue to send message
 	if ((qid[1] = msgget(ftok(".", KEY_NUM), 0)) < 0) {
 		perror("msgget");
@@ -197,6 +216,7 @@ void end_program(WINDOW *window, int *qid, struct msgbuf *message) {
         // send message to server to unregister
         message->mtype = 1;
         message->msgcontent.type = UNREGISTER;
+	message->msgcontent.pid = getpid();
         if (msgsnd(qid[1], (void *)message, sizeof(struct msgbuf), 0) == -1) {
                 perror("msgsnd");
                 exit(1);
@@ -204,4 +224,5 @@ void end_program(WINDOW *window, int *qid, struct msgbuf *message) {
 
         // close window
         endwin();
+	exit(1);
 }

@@ -27,6 +27,7 @@ void sig_handler(int signo);
 int is_in(int *arr, int size, int element); 
 int add_pid(struct client_pid *pid_list, struct content message); 
 int delete_pid(struct client_pid *pid_list, struct content message); 
+int send_pid_list(struct client_pid pid_list, struct content message, struct msgbuf *msg_send); 
 
 
 int main() {
@@ -81,7 +82,11 @@ int main() {
 				delete_pid(&pid_list, message.msgcontent);
 				break;
 
-			case SEND_FAX :
+			case GET_PIDS : ;
+				struct msgbuf msg_to_send;
+				msg_to_send.mtype = 1;
+				msg_to_send.msgcontent.type = GET_PIDS;
+				send_pid_list(pid_list, message.msgcontent, &msg_to_send);
 				break;
 
 			case GET_FAX :
@@ -91,6 +96,11 @@ int main() {
 				break;
 		}
 	
+		printf("Current pid list\n");
+		for (int i = 0; i < pid_list.size; i++) {
+			printf("pid: %d, qid: %d\n",
+				(int)(pid_list.list[i]), pid_list.qid[i]);
+		}
 	}
 
 	system("ipcrm --all=msg"); // remove all message queues
@@ -158,11 +168,39 @@ int delete_pid(struct client_pid *pid_list, struct content message) {
 			break;
 		}
 	}
-	while (index < (pid_list->size) - 1) {
+	while ((index+1) < pid_list->size) {
 		pid_list->list[index] = pid_list->list[index+1];
 		pid_list->qid[index] = pid_list->qid[index+1];
 		index++;
 	}
 	
 	return --(pid_list->size);
+}
+
+// send pid in pid list one by one
+// return the number of messages sent
+int send_pid_list(struct client_pid pid_list, struct content message, struct msgbuf *msg_send) {
+	int i;
+	msg_send->msgcontent.qid = message.qid;
+	for (i = 0; i < pid_list.size; i++) {
+		if (pid_list.list[i] == message.pid) {
+			continue;
+		}
+		msg_send->msgcontent.pid = pid_list.list[i];
+		if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
+			perror("msgsnd");
+			return -1;
+		}
+		printf("Pid info sent to %d\n", message.qid);
+	}
+
+	// let the receiver know that the pid list is all sent
+	msg_send->msgcontent.type = REGISTER;
+	if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
+		perror("msgsnd");
+		return -1;
+	}
+
+
+	return i-2;
 }

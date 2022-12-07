@@ -5,6 +5,7 @@ typedef enum
 { 
 	REGISTER, 
 	UNREGISTER, 
+	GET_PIDS,
 	SEND_FAX, 
 	GET_FAX 
 }MsgType;
