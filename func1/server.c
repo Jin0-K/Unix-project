@@ -13,7 +13,6 @@
 #include "msgtype.h"
 
 #define KEY_NUM 1
-#define SHARED_MEMORY_SIZE 1024*1024
 #define MAX_CLIENT 4
 #define STR_LEN 256
 
@@ -28,6 +27,8 @@ int is_in(int *arr, int size, int element);
 int add_pid(struct client_pid *pid_list, struct content message); 
 int delete_pid(struct client_pid *pid_list, struct content message); 
 int send_pid_list(struct client_pid pid_list, struct content message, struct msgbuf *msg_send); 
+int is_shmaddr(struct content message); 
+int qid_of_pid(struct client_pid pid_list, pid_t pid); 
 
 
 int main() {
@@ -45,9 +46,11 @@ int main() {
 		exit(1);
 	}
 
+	/*
 	// create shared memory
 	int shmid = shmget(key, SHARED_MEMORY_SIZE, IPC_CREAT|0666);
 	void *shmaddr = shmat(shmid, NULL, 0); // will be used by listener client
+	*/
 
 	// create message queue for reception
 	if ((qid = msgget(key, IPC_CREAT|0640)) < 0) {
@@ -72,10 +75,17 @@ int main() {
 				msg_len);
                 }
 
+		int stat;
                 // operation by each message type 
                 switch(message.msgcontent.type) {
                         case REGISTER :
-				add_pid(&pid_list, message.msgcontent);
+				stat = add_pid(&pid_list, message.msgcontent);
+				if (stat == -1) {
+					message.msgcontent.type = UNREGISTER;
+				}
+				// Send client whether the cilent has been registered
+				msgsnd(message.msgcontent.qid, 
+					(void *)&message, sizeof(struct msgbuf), 0);
 				break;
 
 			case UNREGISTER :
@@ -85,8 +95,29 @@ int main() {
 			case GET_PIDS : ;
 				struct msgbuf msg_to_send;
 				msg_to_send.mtype = 1;
-				msg_to_send.msgcontent.type = GET_PIDS;
+			        msg_to_send.msgcontent = (struct content) { 
+							.type = GET_PIDS,
+	                      			        .pid = pid_list.list[0],
+                                                	.qid = 0,
+                                                	.addr = (caddr_t)NULL };
+				
 				send_pid_list(pid_list, message.msgcontent, &msg_to_send);
+				break;
+
+			case SEND_FAX :
+				// allocate shared memory
+				if (!is_shmaddr(message.msgcontent)) {
+					message.msgcontent.addr = mmap(
+						NULL, 
+						SHARED_MEMORY_SIZE, 
+						PROT_READ|PROT_WRITE, 
+						MAP_SHARED|MAP_ANONYMOUS,
+						0, 0);
+				}
+				// send the address of shared memory
+				msgsnd(qid_of_pid(pid_list, message.msgcontent.pid), 
+					(void *)&message, sizeof(struct msgbuf), 0);
+				
 				break;
 
 			case GET_FAX :
@@ -173,6 +204,7 @@ int delete_pid(struct client_pid *pid_list, struct content message) {
 		pid_list->qid[index] = pid_list->qid[index+1];
 		index++;
 	}
+	msgctl(message.qid, IPC_RMID, (struct msqid_ds *)NULL);
 	
 	return --(pid_list->size);
 }
@@ -181,26 +213,45 @@ int delete_pid(struct client_pid *pid_list, struct content message) {
 // return the number of messages sent
 int send_pid_list(struct client_pid pid_list, struct content message, struct msgbuf *msg_send) {
 	int i;
-	msg_send->msgcontent.qid = message.qid;
 	for (i = 0; i < pid_list.size; i++) {
 		if (pid_list.list[i] == message.pid) {
 			continue;
 		}
 		msg_send->msgcontent.pid = pid_list.list[i];
+		msg_send->msgcontent.qid = pid_list.qid[i];
 		if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
 			perror("msgsnd");
 			return -1;
 		}
-		printf("Pid info sent to %d\n", message.qid);
 	}
 
 	// let the receiver know that the pid list is all sent
-	msg_send->msgcontent.type = REGISTER;
+	msg_send->msgcontent.pid = 0;
 	if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
 		perror("msgsnd");
 		return -1;
 	}
+	printf("pid list successfully sent to %d\n", (int)(message.pid));
 
+	return --i;
+}
 
-	return i-2;
+// check if addr of the message is NULL
+int is_shmaddr(struct content message) {
+	if (message.addr == NULL) {
+		return 0;
+	}
+	else {
+		return 1;
+	}
+}
+
+// find the given pid's qid from pid_list
+int qid_of_pid(struct client_pid pid_list, pid_t pid) {
+	for(int i = 0; i < pid_list.size; i++) {
+		if (pid == pid_list.list[i]) {
+			return pid_list.qid[i];
+		}
+	}
+	return -1;
 }

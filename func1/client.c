@@ -12,16 +12,16 @@
 #include "msgtype.h"
 	
 #define KEY_NUM 1
-#define SHARED_MEMORY_SIZE 1024*1024
 #define MAX_FILE 20
 #define STR_LEN 256
 
 
 void create_msgq(int *qid); 
-void remove_msgq(int *qid); 
+void remove_msgq(int qid); 
 void print_txt_files(WINDOW *window, DIR *dp, struct dirent **list, int size); 
 int get_txt_files(DIR *dp, struct dirent **list); 
 char *getLine(WINDOW *window, char *buf, int size); 
+int chooseOpt(WINDOW *window, pid_t *options, int optlen); 
 int get_int(WINDOW *window); 
 int is_in_range(int num, int least, int most); 
 void end_program(WINDOW *window, int *qid, struct msgbuf *message); 
@@ -30,6 +30,7 @@ int main() {
 	int qid[2];
 	struct msgbuf message;
 	message.mtype = 1; // mtype is always 1
+	int msg_len;
 
 	// create a key for IPC
         key_t key = ftok(".", (int)getpid());
@@ -45,17 +46,43 @@ int main() {
         // start a window
         win = newwin(yMax, xMax, 1, 1);
         wrefresh(win);
+	// enable keyboard input
+	keypad(win, true);
 
 	create_msgq(qid);
 
 	// register in server
 	message.msgcontent = (struct content) { .type = REGISTER, 
 						.pid = getpid(),
-						.qid = qid[0] };
+						.qid = qid[0],
+						.addr = (caddr_t)NULL };
 	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
 		wprintw(win, "Failed to connect server\n");
 		end_program(win, qid, &message); 
 	}
+	msg_len = msgrcv(*qid, &message, sizeof(struct msgbuf), 1, 0);
+	if (msg_len < 0) {
+		wprintw(win, "Message queue issue\n");
+		wrefresh(win);
+		wgetch(win);
+		end_program(win, qid, &message);
+	}
+	if (message.msgcontent.type == UNREGISTER) {
+		wprintw(win, "Unable to register\n");
+		wrefresh(win);
+		wgetch(win);
+        	// remove message queue
+        	remove_msgq(*qid);
+		endwin();
+		exit(1);
+	}
+	/*
+	if (message.msgcontent.type == REGISTER) {
+		wprintw(win, "Server Registeration Successful\n");
+		wgetch(win);
+		wrefresh(win);
+	}
+	*/	
 
 
 
@@ -66,6 +93,7 @@ int main() {
         DIR *dp;
         struct dirent *files[MAX_FILE]; // text file list
 	int find, fnum;
+	caddr_t shmaddr;
 
         // print txt files of current directory
         dp = opendir(".");
@@ -75,15 +103,16 @@ int main() {
 		find = get_int(win);
 	} while(!is_in_range(find, 0, fnum)); 
 	wclear(win);
+	wrefresh(win);
 
 	// exit if user canceled
-	if (!find) {
+	if (find == 0) {
 		wprintw(win, "Canceled\n");
 		wgetch(win);
 		end_program(win, qid, &message); 
 	}
 
-	// send message to server that I will send fax
+	// send message to server to give pid list
 	message.msgcontent.type = GET_PIDS;
 	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
 		perror("msgsnd");
@@ -91,25 +120,52 @@ int main() {
 	}
 
 	pid_t pid_list[3]; // pid list to print
-	int ind = 0;
-	int msg_len;
-	do {
-		msg_len = msgrcv(qid[0], &message, sizeof(struct msgbuf), 1, 0);
+	int qid_list[3];
+	int list_n = 0;
+	while(1) {
+		msg_len = msgrcv(*qid, &message, sizeof(struct msgbuf), 1, 0);
 		if (msg_len == -1) {
 			wprintw(win, "Error: unable to receive message\n");
 			wgetch(win);
 			end_program(win, qid, &message);
 		}
 		if (message.msgcontent.type == GET_PIDS) {
-			pid_list[ind++] = message.msgcontent.pid;
+			if (message.msgcontent.pid == 0) {
+				break;
+			}
+			pid_list[list_n++] = message.msgcontent.pid;
 		}
-	} while(message.msgcontent.type != REGISTER);
+	} 
+	// if there is no other client registered in server
+	if (!list_n) {
+		wprintw(win, "No other client to send fax\n");
+		wgetch(win);
+		end_program(win, qid, &message);
+	}	
 
-	// print the received pid list
-	for (int i = 0; i < ind; i++) {
-		wprintw(win, "%d\n", (int)(pid_list[i]));
+	// print the received pid list and let the user choose
+	int rcvr_ind = chooseOpt(win, pid_list, list_n);
+
+	// set message to send server
+	message.msgcontent.type = SEND_FAX;
+	message.msgcontent.pid = pid_list[rcvr_ind];
+	message.msgcontent.qid = qid_list[rcvr_ind];
+	message.msgcontent.addr = (caddr_t)NULL;
+
+	// send message to server
+	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
+		perror("msgsnd");
+		exit(1);
 	}
 
+	// receive the shared memory address
+	msg_len = msgrcv(*qid, &message, sizeof(struct msgbuf), 1, 0);
+	if (msg_len == -1) {
+		wprintw(win, "Error: unable to receive message\n");
+		wgetch(win);
+		end_program(win, qid, &message);
+	}
+	wprintw(win, "Received shared memory address\n");
 
         wgetch(win);
         closedir(dp);
@@ -138,8 +194,10 @@ void create_msgq(int *qid) {
 
 }
 
-void remove_msgq(int *qid) {
-	msgctl(qid[0], IPC_RMID, (struct msqid_ds *)NULL);
+void remove_msgq(int qid) {
+	if (msgctl(qid, IPC_RMID, (struct msqid_ds *)NULL) == -1) {
+		printf("Error: Failed to delete message queue\n");
+	}
 }
 
 // print text files in inode list
@@ -198,6 +256,53 @@ int get_int(WINDOW *window) {
 	return atoi(getLine(window, buf, 8));
 }
 
+// Get an option from user
+int chooseOpt(WINDOW *window, pid_t *options, int optlen) {
+	int choice;
+	int highlight = 0;
+
+	wclear(window);
+	wprintw(window, "Choose an pid to send file\n");
+
+	while (1) {
+		for (int i = 0; i < optlen; i++) {
+			if (i == highlight) {
+				wattron(window, A_REVERSE);
+			}
+			mvwprintw(window, i+2, 1, "%d", (int)options[i]);
+			wattroff(window, A_REVERSE);
+		}
+		choice = wgetch(window);
+
+		switch (choice) {
+			case KEY_UP :
+				highlight--;
+				// When the highlight get out of range
+				if (highlight < 0) {
+					highlight = 0;
+				}
+				break;
+
+			case KEY_DOWN :
+				highlight++;
+				// When the highlight get out of range
+				if (highlight >= optlen) {
+					highlight = optlen - 1;
+				}
+				break;
+
+			default :
+				break;
+		}
+		if (choice == 10) {
+			break;
+		}
+	}
+	wclear(window);
+
+	return highlight;
+}
+
 // check if the integer is within range
 int is_in_range(int num, int least, int most) {
 	if (num < least) {
@@ -211,12 +316,13 @@ int is_in_range(int num, int least, int most) {
 	
 // end program
 void end_program(WINDOW *window, int *qid, struct msgbuf *message) {
-        // remove message queues
-        remove_msgq(qid);
+        // remove message queue
+        remove_msgq(*qid);
         // send message to server to unregister
         message->mtype = 1;
         message->msgcontent.type = UNREGISTER;
 	message->msgcontent.pid = getpid();
+	message->msgcontent.qid = *qid;
         if (msgsnd(qid[1], (void *)message, sizeof(struct msgbuf), 0) == -1) {
                 perror("msgsnd");
                 exit(1);

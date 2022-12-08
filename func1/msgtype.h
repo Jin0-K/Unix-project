@@ -1,6 +1,8 @@
 #ifndef MSGTYPE_H_
 #define MSGTYPE_H_
 
+#define SHARED_MEMORY_SIZE 1024*1024
+
 typedef enum 
 { 
 	REGISTER, 
@@ -14,6 +16,7 @@ struct content {
 	MsgType type;
 	pid_t pid;
 	int qid;
+	caddr_t addr;
 };
 
 struct msgbuf {
