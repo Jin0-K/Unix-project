@@ -22,7 +22,7 @@ struct client_pid {
 	int size;
 };
 
-void sig_handler(int signo); 
+void sig_handler_ctrlc(int signo); 
 int is_in(int *arr, int size, int element); 
 int add_pid(struct client_pid *pid_list, struct content message); 
 int delete_pid(struct client_pid *pid_list, struct content message); 
@@ -40,7 +40,7 @@ int main() {
 	key_t key = ftok(".", KEY_NUM); // key for IPC
 
 	// Signal handler for Ctrl + c
-	hand = signal(SIGINT, sig_handler);
+	hand = signal(SIGINT, sig_handler_ctrlc);
 	if (hand == SIG_ERR) {
 		perror("signal");
 		exit(1);
@@ -58,7 +58,6 @@ int main() {
 		exit(1);
 	}
 
-	system ("ipcs -q");
 	int msg_len;
 	while(1) {
 		// get message
@@ -97,37 +96,49 @@ int main() {
 				msg_to_send.mtype = 1;
 			        msg_to_send.msgcontent = (struct content) { 
 							.type = GET_PIDS,
-	                      			        .pid = pid_list.list[0],
+	                      			        .pid = 0,
                                                 	.qid = 0,
-                                                	.addr = (caddr_t)NULL };
+                                                	.addr = NULL };
 				
 				send_pid_list(pid_list, message.msgcontent, &msg_to_send);
 				break;
 
 			case SEND_FAX :
-				// allocate shared memory
-				if (!is_shmaddr(message.msgcontent)) {
-					message.msgcontent.addr = mmap(
-						NULL, 
-						SHARED_MEMORY_SIZE, 
-						PROT_READ|PROT_WRITE, 
-						MAP_SHARED|MAP_ANONYMOUS,
-						0, 0);
-				}
-				// send the address of shared memory
-				msgsnd(qid_of_pid(pid_list, message.msgcontent.pid), 
-					(void *)&message, sizeof(struct msgbuf), 0);
 				
+				if (!is_shmaddr(message.msgcontent)) {
+					// allocate shared memory
+					int shmid = shmget(
+						ftok(".", message.msgcontent.qid),
+						SHARED_MEMORY_SIZE,
+						IPC_CREAT|0666); 
+					message.msgcontent.addr = shmat(
+						shmid, 
+						NULL,
+						0);
+				}
+				else {
+					message.msgcontent.type = GET_FAX;
+				}
+				// message will be sent back to the process if addr was NULL
+				// else, it will be sent to the process that will receive file
+				msgsnd(message.msgcontent.qid,
+					(void *)&message, sizeof(struct msgbuf), 0);
 				break;
 
 			case GET_FAX :
+				// deallocate shm received
+				shmdt(message.msgcontent.addr);
+				shmctl(
+					ftok(".", message.msgcontent.qid),
+					IPC_RMID,
+					NULL);
 				break;
 			
 			default :
 				break;
 		}
 	
-		printf("Current pid list\n");
+		printf("### Current pid list\n");
 		for (int i = 0; i < pid_list.size; i++) {
 			printf("pid: %d, qid: %d\n",
 				(int)(pid_list.list[i]), pid_list.qid[i]);
@@ -139,7 +150,7 @@ int main() {
 }
 
 
-void sig_handler(int signo) {
+void sig_handler_ctrlc(int signo) {
 	printf("\n====End server\n");
 	system("ipcrm --all=msg"); // remove all message queues
 	exit(1);
@@ -147,12 +158,13 @@ void sig_handler(int signo) {
 
 // check if the element is in the function
 int is_in(int *arr, int size, int element) {
-	for (int i = 0; i < size; i++) {
+	int i;
+	for (i = 0; i < size; i++) {
 		if (arr[i] == element) {
 			return 1;
 		}
 	}
-	return 0;
+	return i;
 }
 
 // add a process in pid list
@@ -226,7 +238,7 @@ int send_pid_list(struct client_pid pid_list, struct content message, struct msg
 	}
 
 	// let the receiver know that the pid list is all sent
-	msg_send->msgcontent.pid = 0;
+	msg_send->msgcontent.qid = 0;
 	if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
 		perror("msgsnd");
 		return -1;
