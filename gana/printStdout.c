@@ -55,7 +55,7 @@ int main(int argc, char* argv[]){
 	printf("--------------------------\n");
 	printf("출력 완료: %s\n", argv[1]);
 
-	//kill(getppid(), SIGUSR2);
+	kill(getppid(), SIGUSR2);
 	
 	return 0;
 }

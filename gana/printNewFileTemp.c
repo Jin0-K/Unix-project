@@ -3,28 +3,22 @@
 #include <sys/stat.h> //open()
 #include <fcntl.h> //open(), mmap()
 #include <sys/mman.h> //mmap()
-#include <signal.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-int main(int argc, char* argv[]){
-
-	if(argc < 2){
-		perror("not engouh argc");
-		exit(1);
-	}
+int main(void){
 
 	/* 시간 */
 	time_t tloc;
 
 	time(&tloc);
+	printf("time: %d\n", (int)tloc);
 	/* 시간 끝 */
 
 	/* 파일 목록 */
-	/*
 	DIR* dir;
 	struct dirent* ent;
 	char* files[50];
@@ -55,7 +49,7 @@ int main(int argc, char* argv[]){
 	for(int cnt=0; cnt<i; cnt++){
 		printf("file: %s\n", files[cnt]);
 	}
-	*/	
+		
 	/* 파일 목록 끝  */
 
 	/* 메모리 맵핑 */	
@@ -63,7 +57,7 @@ int main(int argc, char* argv[]){
 	caddr_t addr;
 	struct stat statbuf;
 
-	char* filePath = argv[1];
+	char* filePath = "test.txt";
 
 	if(stat(filePath, &statbuf) == -1){
 		perror("stat");
@@ -82,30 +76,30 @@ int main(int argc, char* argv[]){
 	}
 	close(fd);
 
-	//printf("%s\n", addr);
+	printf("%s\n", addr);
 	/* 메모리 맵핑 끝 */
 
 
 	/* 새로운 파일의 이름만들기 */
 
-	char* str = argv[1];
+	char str[] = "test2.txt";
 
 	char* extension = (char*) malloc(sizeof(char) * strlen(str));
 	strcpy(extension, str);
 	extension = strchr(extension, '.');
-	//printf("ex: %s\n", extension);
+	printf("ex: %s\n", extension);
 
 	// 왜 .txt로 잘랐을 땐 안되는지 확인필요
 	char* newFileName = strtok(str, ".");
-	//printf("new fileName: %s\n", newFileName);
+	printf("new fileName: %s\n", newFileName);
 	
 	char timeBuf[100];
 	sprintf(timeBuf, "-%d-복사본", (int)tloc);
 	newFileName = strcat(newFileName, timeBuf);
-	//printf("new fileName2: %s\n", newFileName);
+	printf("new fileName2: %s\n", newFileName);
 	
 	newFileName = strcat(newFileName, extension);
-	//printf("new fileName3: %s\n", newFileName);
+	printf("new fileName3: %s\n", newFileName);
 
 	/* 새로운 파일의 이름만들기 끝 */
 	
@@ -117,8 +111,6 @@ int main(int argc, char* argv[]){
 
 	fclose(fpout);
 	/* 복사본 파일 만들기 끝 */
-
-	kill(getppid(), SIGUSR2);
 
 	return 0;
 

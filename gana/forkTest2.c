@@ -17,7 +17,7 @@ int main(void){
 
 		case 0:
 			printf("child proc\n");
-			execl("printStdout", "printStdout", "a", "b",  (char*)NULL);
+			execl("printStdout", "printStdout", "test2.txt",  (char*)NULL);
 			exit(0);
 			break;
 
