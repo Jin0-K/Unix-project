@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ncurses.h>
 
 void kill_ctrl_z_handler(int signo){
 	printf("---------------------------\n");

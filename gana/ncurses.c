@@ -78,7 +78,6 @@ void print(char* str){
 
 void initPrinter(WINDOW* win){
 
-	wprintw(win, "make printer\n");
 
         /* 자식 프세로 프린터 만들기 */
         switch(printerPid = fork()){
@@ -87,16 +86,19 @@ void initPrinter(WINDOW* win){
                         exit(1);
                         break;
                 case 0:
-			if(win == NULL){
-				printf("null");
+			wrefresh(win);
+			wprintw(win, "pleas in child\n");
+			wrefresh(win);
+			/*
+			if(execl("printer", "printer", (char*)NULL) == -1){
+				perror("execl");
 			}
-			else{
-				wprintw(win, "not null");
-			}
+			*/
 			exit(0);
                         break;
                 default:
-			print("make parent\n");
+			//wait(0);
+			//print("make parent\n");
                         break;
         }
         /* 자식 프세로 프린터 만들기 끝 */
@@ -211,9 +213,11 @@ int main(void){
                 exit(1);
         }
 
-	curs_set(0);
 	initPrinter(pLabelWin);
-	print("hello!\n");
+
+	//sleep(1);
+	//wrefresh(pLabelWin);
+	//print("hello!\n");
 
 
 	int choice;
@@ -222,6 +226,7 @@ int main(void){
 		// 파일 몰록
 		char* files[50];
 		int fileNum;
+		Msgbuf msg;
 
 		switch (choice) {
 			case 0: // 팩스
@@ -243,6 +248,11 @@ int main(void){
 				// 원래 메뉴창으로 크기 변경
 				wEraseWin(menuWin, fileNum+2, menuW);
 				winResize(menuWin, menuH, menuW);
+
+                        	msg.mtype = STDOUT;
+				strcpy(msg.mtext, files[choice]);
+				msgsnd(msgid, (void*)&msg, SIZE, IPC_NOWAIT);
+				kill(printerPid, SIGUSR1);
 				break;
 			case 2:
 				winResize(menuWin, menuH+5, menuW);
@@ -255,6 +265,9 @@ int main(void){
 	}
 	
 	getch();
+
+	kill(printerPid, 9);
+
 	endwin();
 
 	return 0;
