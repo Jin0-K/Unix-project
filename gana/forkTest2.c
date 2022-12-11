@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <ncurses.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -17,12 +18,18 @@ int main(void){
 
 		case 0:
 			printf("child proc\n");
-			execl("printStdout", "printStdout", "test2.txt",  (char*)NULL);
+			execl("printNcur", "printNcur",  (char*)NULL);
 			exit(0);
 			break;
 
 		default:
-			wait(&status);
+			initscr();
+			WINDOW* mywin;
+			printw("hello parent!");
+			refresh();
+			getch();
+			endwin();
+			//wait(&status);
 			printf("parent proc\n");
 			break;
 	}

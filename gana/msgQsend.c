@@ -46,8 +46,8 @@ int main(void){
 	
 	Msgbuf msgbuf;
 
-        msgbuf.mtype = NEWFILE;
-        strcpy(msgbuf.mtext, "test.txt");
+        msgbuf.mtype = STDOUT;
+        strcpy(msgbuf.mtext, "test2.txt");
 
         if(msgsnd(msgid, (void*)&msgbuf, SIZE, IPC_NOWAIT) == -1){
                 perror("msgsnd");

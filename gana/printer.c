@@ -25,13 +25,15 @@ void kill_printout_handler(int signo){
 // SIGUSR2
 void complete_print_handler(int signo){
 	// 함수 변경 필요
-	// sigrelse(SIGUSR1);
 	// SIGUSR1 언블록킹
+	/*
 	sigset_t signals;
 	sigemptyset(&signals);
 	sigaddset(&signals, SIGUSR1);
 	sigprocmask(SIG_UNBLOCK, &signals, (sigset_t*)NULL);
+	*/
 	printf("sig1 언블록킹\n");
+	sigrelse(SIGUSR1);
 }
 
 // 출력 시그널
@@ -40,12 +42,15 @@ void print_handler(int signo){
 	// 다른 시그널 다 막아야하나?
 	// SIGUSR1, SIGUSR2 블록킹 하기
 	printf("SIG1, SIG2 블록킹\n");
+	/*
 	sigset_t signals;
 	sigemptyset(&signals);
 	sigaddset(&signals, SIGUSR1);
 	sigaddset(&signals, SIGUSR2);
 	sigprocmask(SIG_BLOCK, &signals, (sigset_t*)NULL);
-
+	*/
+	sighold(SIGUSR1);
+	//sighold(SIGUSR2);
 
 	// 메세지 큐에 내용이 없다면 함수 끝내기.
 	struct msqid_ds tmpbuf;
@@ -62,6 +67,7 @@ void print_handler(int signo){
 	printf("received msg: %s, type: %ld, len: %ld\n", rcvMsg.mtext, rcvMsg.mtype,  strlen(rcvMsg.mtext));
 	
 	// 자식 프세 만들기
+	
 	switch(rcvMsg.mtype){
 		case NEWFILE:
 			temp("printNewFile", rcvMsg.mtext);
@@ -76,13 +82,21 @@ void print_handler(int signo){
 			printf("fail to switch..\n");
 			break;
 	}
-
-	// SIGUSR2 언블록킹
 	
+	sleep(1);
+
+	sigset_t set;
+	sigfillset(&set);
+	sigdelset(&set,SIGUSR2);
+	sigsuspend(&set);
+	// SIGUSR2 언블록킹
+	/*	
 	sigemptyset(&signals);
 	sigaddset(&signals, SIGUSR2);
 	sigprocmask(SIG_UNBLOCK, &signals, (sigset_t*)NULL);
-	printf("sig2 언블록킹\n");
+	*/
+	//printf("sig2 언블록킹\n");
+	//sigrelse(SIGUSR2);
 	
 }
 
@@ -103,6 +117,24 @@ void temp(char* program, char* arg){
         }
 }
 
+void sig1(int signo){
+	sighold(SIGUSR1);
+	sighold(SIGUSR2);
+	printf("sig1 handler\n");
+	temp("kill", "test");
+	sleep(5);
+	sigrelse(SIGUSR2);
+
+	sigset_t set;
+	sigfillset(&set);
+	sigdelset(&set,SIGUSR2);
+	sigsuspend(&set);
+}
+
+void sig2(int signo){
+	sigrelse(SIGUSR1);
+}
+
 int main(void){
 	
 	key_t key;
@@ -116,6 +148,8 @@ int main(void){
 
 	signal(SIGUSR1, print_handler);
 	signal(SIGUSR2, complete_print_handler);
+	//signal(SIGUSR1, sig1);
+	//signal(SIGUSR2, sig2);
 
 	printf("in printer\n");
 
