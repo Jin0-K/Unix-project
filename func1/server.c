@@ -20,7 +20,6 @@ struct client_pid {
 };
 
 void sig_handler_ctrlc(int signo); 
-int is_in(int *arr, int size, int element); 
 int is_pid_in(struct client_pid clients, pid_t pid);
 int add_pid(struct client_pid *pid_list, struct cont message); 
 int delete_pid(struct client_pid *pid_list, struct cont message); 
@@ -100,11 +99,8 @@ int main() {
 					// message will be sent to the process that will receive file
 					msgsnd(qid_of_pid(pid_list, message.content.pid),
 						(void *)&message, sizeof(struct message), 0);
+					kill(message.content.qid, SIGALRM);
 				}
-				break;
-
-			case GET_FAX :
-				// deallocate shm received
 				break;
 			
 			default :
@@ -129,17 +125,6 @@ void sig_handler_ctrlc(int signo) {
 	exit(1);
 }
 
-// check if the element is in the function
-int is_in(int *arr, int size, int element) {
-	int i;
-	for (i = 0; i < size; i++) {
-		if (arr[i] == element) {
-			return i;
-		}
-	}
-	return -1;
-}
-
 // check if the pid is in the client list
 int is_pid_in(struct client_pid clients, pid_t pid) {
 	int i;
@@ -161,20 +146,8 @@ int add_pid(struct client_pid *pid_list, struct cont message) {
 		return -1;
 	}
 
-	// add pid in the list
+	// add pid and qid on the list
 	pid_list->list[pid_list->size] = message.pid;
-	/* 
-	I made useless code by misunderstanding, but not gonna delete it just in case
-	// give the added pid new key num for message queue
-	do {
-		if (++client_key > 255) {
-			client_key = 2;
-		}
-	} while (is_in(pid_list->key_num, pid_list->size, client_key)); 
-	pid_list->key_num[pid_list->size] = client_key;
-	*/
-
-	// add qid in the list
 	pid_list->qid[pid_list->size] = message.qid;
 
 	return ++(pid_list->size);
