@@ -14,16 +14,15 @@ typedef enum
 	GET_FAX 
 }MsgType;
 
-struct content {
+struct cont {
 	MsgType type;
 	pid_t pid;
 	int qid;
-	caddr_t addr;
 };
 
-struct msgbuf {
+struct message {
         long mtype;
-        struct content msgcontent;
+        struct cont content;
 };
 
 

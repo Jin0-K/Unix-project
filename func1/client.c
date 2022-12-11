@@ -12,8 +12,8 @@
 #include <fcntl.h>
 #include <ncurses.h>
 #include "msgtype.h"
-	
-#define KEY_NUM 1
+#include "data.h"
+
 #define MAX_FILE 10
 #define STR_LEN 256
 
@@ -24,14 +24,15 @@ struct dirent choose_file(WINDOW *window, DIR *dp, int *file_ind);
 char *getLine(WINDOW *window, char *buf, int size); 
 int chooseOpt(WINDOW *window, pid_t *options, int optlen); 
 int get_int(WINDOW *window);
-int receive_pid_list(WINDOW *window, int qid, struct msgbuf *message, pid_t *pids, int *qids);
+int receive_pid_list(WINDOW *window, int qid, struct message *message, pid_t *pids, int *qids);
 int is_in_range(int num, int least, int most); 
-void end_program(WINDOW *window, int *qid, struct msgbuf *message); 
+void end_program(WINDOW *window, int *qid, struct message *message); 
 
+int cli_keynum;
+int qid[2];
+	
 int main() {
-	int keynum;
-	int qid[2];
-	struct msgbuf message;
+	struct message message;
 	message.mtype = 1; // mtype is always 1
 	int msg_len;
 
@@ -52,27 +53,28 @@ int main() {
 	// enable keyboard input
 	keypad(win, true);
 
-	create_msgq(&keynum, qid);
+	create_msgq(&cli_keynum, qid);
 
 	// register in server
-	message.msgcontent = (struct content) { 
+	message.content = (struct cont) { 
 					.type = REGISTER, 
 					.pid = getpid(),
-					.qid = qid[0],
-					.addr = NULL };
-	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
+					.qid = qid[0] };
+	if (msgsnd(qid[1], (void *)&message, sizeof(struct message), 0) == -1) {
 		wprintw(win, "Failed to connect server\n");
 		end_program(win, qid, &message); 
 	}
 	do {
-		msg_len = msgrcv(qid[0], &message, sizeof(struct msgbuf), 1, 0);
+		msg_len = msgrcv(qid[0], &message, sizeof(struct message), 1, 0);
 		if (msg_len < 0) {
-			wprintw(win, "Error: Message queue issue\n");
-			wrefresh(win);
-			wgetch(win);
-			end_program(win, qid, &message);
+			//wprintw(win, "Error: Message queue issue\n");
+			//wgetch(win);
+			//end_program(win, qid, &message);
+			endwin();
+			perror("msgrcv");
+			exit(1);
 		}
-		if (message.msgcontent.type == UNREGISTER) {
+		if (message.content.type == UNREGISTER) {
 			wprintw(win, "Unable to register\n");
 			wrefresh(win);
 			wgetch(win);
@@ -81,7 +83,7 @@ int main() {
 			endwin();
 			exit(1);
 		}
-	} while(message.msgcontent.type != REGISTER);	
+	} while(message.content.type != REGISTER);	
 
 
 
@@ -92,7 +94,7 @@ int main() {
         DIR *dp;
         struct dirent file;
         int find;
-	caddr_t shmaddr;
+	char *shmaddr;
 
         // Get user input of what file to send
         dp = opendir(".");
@@ -106,8 +108,8 @@ int main() {
 	}
 
 	// send message to server to give pid list
-	message.msgcontent.type = GET_PIDS;
-	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
+	message.content.type = GET_PIDS;
+	if (msgsnd(qid[1], (void *)&message, sizeof(struct message), 0) == -1) {
 		perror("msgsnd");
 		exit(1);
 	}
@@ -115,6 +117,7 @@ int main() {
 	pid_t pid_list[MAX_CLIENT - 1]; // pid list to print
 	int qid_list[MAX_CLIENT - 1];
 	int list_n = 0;
+	// Hot fix for unknown error
 	int qid_r = qid[0];
 	int qid_s = qid[1];
 	list_n = receive_pid_list(win, qid[0], &message, pid_list, qid_list);
@@ -122,6 +125,7 @@ int main() {
 	qid[0] = qid_r;
 	qid[1] = qid_s;
 	wprintw(win, "Recepton qid: %d\n", qid[0]);
+	wprintw(win, "\n%d\n", pid_list[0]);
 	wgetch(win);
 	
 	
@@ -145,7 +149,8 @@ int main() {
 	wprintw(win, "Receiver Selected\n");
 	
 	int fd;
-	caddr_t addr;
+	int shmid;
+	char *addr;
 	struct stat statbuf;
 	
 	// Open file to share
@@ -160,29 +165,36 @@ int main() {
 		end_program(win, qid, &message);
 	}
 	
-	// assign memory and write the file
-	addr = mmap(NULL, SHARED_MEMORY_SIZE, 
-		PROT_READ|PROT_WRITE, MAP_SHARED, fd, (off_t)0);
-	if (addr == MAP_FAILED) {
-		wprintw(win, "Error: mmap failed\n");
+	// assign memory
+	shmid = shmget(ftok(".", cli_keynum), statbuf.st_size, IPC_CREAT|0666);
+	if (shmid == -1) {
+		wprintw(win, "Error: Unable to create shared memory\n");
 		wgetch(win);
 		end_program(win, qid, &message);
 	}
+	addr = shmat(shmid, NULL, 0);
+	
+	// read file to put it in shared memory
+	if (read(fd, addr, statbuf.st_size) == -1) {
+		wprintw(win, "Error: unable to read file\n");
+		wgetch(win);
+		end_program(win, qid, &message);
+	}
+	
 	close(fd);
 	closedir(dp);
 	
 
 	// set message to send server
-	message.msgcontent.type = SEND_FAX;
-	message.msgcontent.pid = pid_list[rcvr_ind];
-	message.msgcontent.qid = qid_r;
-	message.msgcontent.addr = addr;
+	message.content.type = SEND_FAX;
+	message.content.pid = pid_list[rcvr_ind];
+	message.content.qid = shmid;
 	
 	wprintw(win, "Message set\n");
 	
 
 	// send message to server to share memory with receiver
-	if (msgsnd(qid_s, (void *)&message, sizeof(struct msgbuf), 0) == -1) {
+	if (msgsnd(qid_s, (void *)&message, sizeof(struct message), 0) == -1) {
 		wprintw(win, "Error: Unable to send message");
 		wgetch(win);
 		end_program(win, qid, &message);
@@ -192,14 +204,6 @@ int main() {
 	wprintw(win, "qid_r = %d\n", qid_r);
 	wprintw(win, "qid[0] = %d, qid[1] = %d\n", qid[0], qid[1]);
 	wgetch(win);
-	
-	msg_len = msgrcv(qid[0], &message, sizeof(struct msgbuf), 1, 0);
-	if (msg_len < 0) {
-		wprintw(win, "Error: Message queue issue\n");
-		wrefresh(win);
-		wgetch(win);
-		end_program(win, qid, &message);
-	}
 
 	end_program(win, qid, &message); 
 
@@ -208,12 +212,17 @@ int main() {
 
 
 // create message queues
-void create_msgq(int *keynum, int *qid) {
+void create_msgq(int *key_num, int *qids) {
 	// message queue to receive message
-	*keynum = (int)getpid() % 253 + 2;
-	while ((qid[0] = msgget(ftok(".", *keynum), IPC_CREAT|IPC_EXCL|0640)) < 0) {
-		if (++(*keynum) > 255) {
-			*keynum = 2;
+	*key_num = (int)getpid() % 253 + 2;
+	// don't let client key num value same as printer key num
+	if (*key_num == keynum) {
+		(*key_num)++;
+	}
+	// reset key_num if it already exists
+	while ((qids[0] = msgget(ftok(".", *key_num), IPC_CREAT|IPC_EXCL|0640)) < 0) {
+		if (++(*key_num) > 255) {
+			*key_num = 2;
 		}
 	}
 
@@ -225,8 +234,8 @@ void create_msgq(int *keynum, int *qid) {
 
 }
 
-void remove_msgq(int qid) {
-	if (msgctl(qid, IPC_RMID, (struct msqid_ds *)NULL) == -1) {
+void remove_msgq(int qid_r) {
+	if (msgctl(qid_r, IPC_RMID, (struct msqid_ds *)NULL) == -1) {
 		printf("Error: Failed to delete message queue\n");
 	}
 }
@@ -308,25 +317,23 @@ int get_int(WINDOW *window) {
 }
 
 // Receive pid list from server
-int receive_pid_list(WINDOW *window, int qid, struct msgbuf *message, pid_t *pids, int *qids) {
+int receive_pid_list(WINDOW *window, int qid_r, struct message *message, pid_t *pids, int *qids) {
 	int msg_len;
 	int num = 0;
 	while(1) {
-		//wprintw(window, "My qid: %d\nServer qid: %d\n", qid[0], qid[1]);
-		msg_len = msgrcv(qid, message, sizeof(struct msgbuf), 1, 0);
+		msg_len = msgrcv(qid_r, message, sizeof(struct message), 1, 0);
 		wprintw(window, "### message received\n");
-		//wprintw(window, "My qid: %d\nServer qid: %d\n", qid[0], qid[1]);
 		if (msg_len == -1) {
 			return -1;
 		}
-		if (message->msgcontent.type == GET_PIDS) {
-			if (message->msgcontent.pid == 0) {
+		if (message->content.type == GET_PIDS) {
+			if (message->content.pid == 0) {
 				break;
 			}
-			pids[num] = message->msgcontent.pid;
-			qids[num++] = message->msgcontent.qid;
-			wprintw(window, "  Received %d\n", message->msgcontent.pid);
-			wprintw(window, "  pid_list[%d] = %d\n", num, pids[num - 1]);
+			pids[num] = message->content.pid;
+			qids[num++] = message->content.qid;
+			wprintw(window, "  Received %d\n", message->content.pid);
+			wprintw(window, "  pid_list[%d] = %d\n", num-1, pids[num - 1]);
 		}
 	}
 	return num;
@@ -388,17 +395,42 @@ int is_in_range(int num, int least, int most) {
 	}
 	return 1;
 }
+
+// operation when received GET_FAX
+void sig_handler_getfax(int signo) {
+	void send_msg_printer(struct message *message);
+	int msg_len;
+	struct message msg;
+	
+	// Receive message
+	msg_len = msgrcv(qid[0], &msg, sizeof(struct message), 1, 0);
+	send_msg_printer(&msg);
+}
+
+// Send the received message to printer
+void send_msg_printer(struct message *message) {
+	int msqid;
+	Msgbuf msg_send;
+	
+	msg_send.mtype = FAX;
+	
+	// send the message to printer message queue
+	msqid = msgget(ftok(keyfile, keynum), 0);
+	if (msgsnd(msqid, (void *)&msg_send, SIZE, IPC_NOWAIT) == -1) {
+		perror("msgsnd");
+	}
+}
 	
 // end program
-void end_program(WINDOW *window, int *qid, struct msgbuf *message) {
+void end_program(WINDOW *window, int *qids, struct message *message) {
         // remove message queue
-        remove_msgq(*qid);
+        remove_msgq(*qids);
         // send message to server to unregister
         message->mtype = 1;
-        message->msgcontent.type = UNREGISTER;
-	message->msgcontent.pid = getpid();
-	message->msgcontent.qid = *qid;
-        if (msgsnd(qid[1], (void *)message, sizeof(struct msgbuf), 0) == -1) {
+        message->content.type = UNREGISTER;
+	message->content.pid = getpid();
+	message->content.qid = *qids;
+        if (msgsnd(qids[1], (void *)message, sizeof(struct message), 0) == -1) {
                 perror("msgsnd");
                 exit(1);
         }
