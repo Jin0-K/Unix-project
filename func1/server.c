@@ -12,7 +12,6 @@
 #include <dirent.h>
 #include "msgtype.h"
 
-#define STR_LEN 256
 
 struct client_pid {
 	pid_t list[MAX_CLIENT];
@@ -23,16 +22,15 @@ struct client_pid {
 void sig_handler_ctrlc(int signo); 
 int is_in(int *arr, int size, int element); 
 int is_pid_in(struct client_pid clients, pid_t pid);
-int add_pid(struct client_pid *pid_list, struct content message); 
-int delete_pid(struct client_pid *pid_list, struct content message); 
-int send_pid_list(struct client_pid pid_list, struct content message, struct msgbuf *msg_send); 
-int is_shmaddr(struct content message); 
+int add_pid(struct client_pid *pid_list, struct cont message); 
+int delete_pid(struct client_pid *pid_list, struct cont message); 
+int send_pid_list(struct client_pid pid_list, struct cont message, struct message *msg_send); 
 int qid_of_pid(struct client_pid pid_list, pid_t pid); 
 
 
 int main() {
 	void (*hand)(int);
-	struct msgbuf message;
+	struct message message;
 	struct client_pid pid_list;
 	pid_list.size = 0;
 	int qid; // message queue id to receive
@@ -45,12 +43,6 @@ int main() {
 		exit(1);
 	}
 
-	/*
-	// create shared memory
-	int shmid = shmget(key, SHARED_MEMORY_SIZE, IPC_CREAT|0666);
-	void *shmaddr = shmat(shmid, NULL, 0); // will be used by client
-	*/
-
 	// create message queue for reception
 	if ((qid = msgget(key, IPC_CREAT|0640)) < 0) {
 		perror("msgget");
@@ -60,7 +52,7 @@ int main() {
 	int msg_len;
 	while(1) {
 		// get message
-		msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 1, 0);
+		msg_len = msgrcv(qid, &message, sizeof(struct message), 1, 0);
 		if (msg_len == -1) { // if message cannot be received
                         printf("Message cannot be received\n");
 			/* delete the message in the queue */
@@ -68,54 +60,51 @@ int main() {
                 }
                 else {
                         printf("Received pid: %d, qid: %d, len = %d\n",
-                                message.msgcontent.pid, 
-				message.msgcontent.qid,
+                                message.content.pid, 
+				message.content.qid,
 				msg_len);
                 }
 
 		int stat;
                 // operation by each message type 
-                switch(message.msgcontent.type) {
+                switch(message.content.type) {
                         case REGISTER :
-				stat = add_pid(&pid_list, message.msgcontent);
+				stat = add_pid(&pid_list, message.content);
 				if (stat == -1) {
-					message.msgcontent.type = UNREGISTER;
+					message.content.type = UNREGISTER;
 				}
 				// Send client whether the cilent has been registered
-				msgsnd(message.msgcontent.qid, 
-					(void *)&message, sizeof(struct msgbuf), 0);
+				msgsnd(message.content.qid, 
+					(void *)&message, sizeof(struct message), 0);
 				break;
 
 			case UNREGISTER :
-				delete_pid(&pid_list, message.msgcontent);
+				delete_pid(&pid_list, message.content);
 				break;
 
 			case GET_PIDS : ;
-				struct msgbuf msg_to_send;
+				struct message msg_to_send;
 				msg_to_send.mtype = 1;
-			        msg_to_send.msgcontent = (struct content) { 
+			        msg_to_send.content = (struct cont) { 
 							.type = GET_PIDS,
 	                      			        .pid = 0,
-                                                	.qid = 0,
-                                                	.addr = NULL };
+                                                	.qid = 0 };
 				
-				send_pid_list(pid_list, message.msgcontent, &msg_to_send);
+				send_pid_list(pid_list, message.content, &msg_to_send);
 				break;
 
 			case SEND_FAX :
 				// if the receiver is not on the list
-				if (is_pid_in(pid_list, message.msgcontent.pid) >= 0) {
-					message.msgcontent.type = GET_FAX;
+				if (is_pid_in(pid_list, message.content.pid) >= 0) {
+					message.content.type = GET_FAX;
 					// message will be sent to the process that will receive file
-					msgsnd(qid_of_pid(pid_list, message.msgcontent.pid),
-						(void *)&message, sizeof(struct msgbuf), 0);
+					msgsnd(qid_of_pid(pid_list, message.content.pid),
+						(void *)&message, sizeof(struct message), 0);
 				}
 				break;
 
 			case GET_FAX :
 				// deallocate shm received
-				munmap(message.msgcontent.addr, 
-					(off_t)(message.msgcontent.qid));
 				break;
 			
 			default :
@@ -164,7 +153,7 @@ int is_pid_in(struct client_pid clients, pid_t pid) {
 
 // add a process in pid list
 // return the size of pid_list
-int add_pid(struct client_pid *pid_list, struct content message) {
+int add_pid(struct client_pid *pid_list, struct cont message) {
 	static int client_key = 2;
 
 	// return -1 if the pid_list is full
@@ -193,7 +182,7 @@ int add_pid(struct client_pid *pid_list, struct content message) {
 
 // delete a process from pid list
 // return the size of pid_list
-int delete_pid(struct client_pid *pid_list, struct content message) {
+int delete_pid(struct client_pid *pid_list, struct cont message) {
 	// return -1 if pid_list is empty
 	if (pid_list->size < 1) {
 		return -1;
@@ -218,23 +207,23 @@ int delete_pid(struct client_pid *pid_list, struct content message) {
 
 // send pid in pid list one by one
 // return the number of messages sent
-int send_pid_list(struct client_pid pid_list, struct content message, struct msgbuf *msg_send) {
+int send_pid_list(struct client_pid pid_list, struct cont message, struct message *msg_send) {
 	int i;
 	for (i = 0; i < pid_list.size; i++) {
 		if (pid_list.list[i] == message.pid) {
 			continue;
 		}
-		msg_send->msgcontent.pid = pid_list.list[i];
-		msg_send->msgcontent.qid = pid_list.qid[i];
-		if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
+		msg_send->content.pid = pid_list.list[i];
+		msg_send->content.qid = pid_list.qid[i];
+		if (msgsnd(message.qid, (void *)msg_send, sizeof(struct message), 0) == -1) {
 			perror("msgsnd");
 			return -1;
 		}
 	}
 
 	// let the receiver know that the pid list is all sent
-	msg_send->msgcontent.pid = 0;
-	if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
+	msg_send->content.pid = 0;
+	if (msgsnd(message.qid, (void *)msg_send, sizeof(struct message), 0) == -1) {
 		perror("msgsnd");
 		return -1;
 	}
@@ -243,15 +232,6 @@ int send_pid_list(struct client_pid pid_list, struct content message, struct msg
 	return --i;
 }
 
-// check if addr of the message is NULL
-int is_shmaddr(struct content message) {
-	if (message.addr == NULL) {
-		return 0;
-	}
-	else {
-		return 1;
-	}
-}
 
 // find the given pid's qid from pid_list
 int qid_of_pid(struct client_pid pid_list, pid_t pid) {
