@@ -1,6 +1,8 @@
 #ifndef MSGTYPE_H_
 #define MSGTYPE_H_
 
+#define KEY_NUM 1
+#define MAX_CLIENT 4
 #define SHARED_MEMORY_SIZE 1024*512
 
 typedef enum 
@@ -16,7 +18,7 @@ struct content {
 	MsgType type;
 	pid_t pid;
 	int qid;
-	void *addr;
+	caddr_t addr;
 };
 
 struct msgbuf {

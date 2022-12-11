@@ -12,8 +12,6 @@
 #include <dirent.h>
 #include "msgtype.h"
 
-#define KEY_NUM 1
-#define MAX_CLIENT 4
 #define STR_LEN 256
 
 struct client_pid {
@@ -24,6 +22,7 @@ struct client_pid {
 
 void sig_handler_ctrlc(int signo); 
 int is_in(int *arr, int size, int element); 
+int is_pid_in(struct client_pid clients, pid_t pid);
 int add_pid(struct client_pid *pid_list, struct content message); 
 int delete_pid(struct client_pid *pid_list, struct content message); 
 int send_pid_list(struct client_pid pid_list, struct content message, struct msgbuf *msg_send); 
@@ -49,7 +48,7 @@ int main() {
 	/*
 	// create shared memory
 	int shmid = shmget(key, SHARED_MEMORY_SIZE, IPC_CREAT|0666);
-	void *shmaddr = shmat(shmid, NULL, 0); // will be used by listener client
+	void *shmaddr = shmat(shmid, NULL, 0); // will be used by client
 	*/
 
 	// create message queue for reception
@@ -62,7 +61,7 @@ int main() {
 	while(1) {
 		// get message
 		msg_len = msgrcv(qid, &message, sizeof(struct msgbuf), 1, 0);
-		if (msg_len < 0) { // if message cannot be received
+		if (msg_len == -1) { // if message cannot be received
                         printf("Message cannot be received\n");
 			/* delete the message in the queue */
                         continue;
@@ -104,34 +103,19 @@ int main() {
 				break;
 
 			case SEND_FAX :
-				
-				if (!is_shmaddr(message.msgcontent)) {
-					// allocate shared memory
-					int shmid = shmget(
-						ftok(".", message.msgcontent.qid),
-						SHARED_MEMORY_SIZE,
-						IPC_CREAT|0666); 
-					message.msgcontent.addr = shmat(
-						shmid, 
-						NULL,
-						0);
-				}
-				else {
+				// if the receiver is not on the list
+				if (is_pid_in(pid_list, message.msgcontent.pid) >= 0) {
 					message.msgcontent.type = GET_FAX;
+					// message will be sent to the process that will receive file
+					msgsnd(qid_of_pid(pid_list, message.msgcontent.pid),
+						(void *)&message, sizeof(struct msgbuf), 0);
 				}
-				// message will be sent back to the process if addr was NULL
-				// else, it will be sent to the process that will receive file
-				msgsnd(message.msgcontent.qid,
-					(void *)&message, sizeof(struct msgbuf), 0);
 				break;
 
 			case GET_FAX :
 				// deallocate shm received
-				shmdt(message.msgcontent.addr);
-				shmctl(
-					ftok(".", message.msgcontent.qid),
-					IPC_RMID,
-					NULL);
+				munmap(message.msgcontent.addr, 
+					(off_t)(message.msgcontent.qid));
 				break;
 			
 			default :
@@ -161,10 +145,21 @@ int is_in(int *arr, int size, int element) {
 	int i;
 	for (i = 0; i < size; i++) {
 		if (arr[i] == element) {
-			return 1;
+			return i;
 		}
 	}
-	return i;
+	return -1;
+}
+
+// check if the pid is in the client list
+int is_pid_in(struct client_pid clients, pid_t pid) {
+	int i;
+	for (i = 0; i < clients.size; i++) {
+		if (clients.list[i] == pid) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 // add a process in pid list
@@ -238,7 +233,7 @@ int send_pid_list(struct client_pid pid_list, struct content message, struct msg
 	}
 
 	// let the receiver know that the pid list is all sent
-	msg_send->msgcontent.qid = 0;
+	msg_send->msgcontent.pid = 0;
 	if (msgsnd(message.qid, (void *)msg_send, sizeof(struct msgbuf), 0) == -1) {
 		perror("msgsnd");
 		return -1;

@@ -1,3 +1,4 @@
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -13,17 +14,17 @@
 #include "msgtype.h"
 	
 #define KEY_NUM 1
-#define MAX_FILE 20
+#define MAX_FILE 10
 #define STR_LEN 256
 
 
 void create_msgq(int *keynum, int *qid); 
 void remove_msgq(int qid); 
-void print_txt_files(WINDOW *window, DIR *dp, char list[][STR_LEN], int size); 
-int get_txt_files(DIR *dp, char list[][STR_LEN]); 
+struct dirent choose_file(WINDOW *window, DIR *dp, int *file_ind);
 char *getLine(WINDOW *window, char *buf, int size); 
 int chooseOpt(WINDOW *window, pid_t *options, int optlen); 
-int get_int(WINDOW *window); 
+int get_int(WINDOW *window);
+int receive_pid_list(WINDOW *window, int qid, struct msgbuf *message, pid_t *pids, int *qids);
 int is_in_range(int num, int least, int most); 
 void end_program(WINDOW *window, int *qid, struct msgbuf *message); 
 
@@ -63,29 +64,24 @@ int main() {
 		wprintw(win, "Failed to connect server\n");
 		end_program(win, qid, &message); 
 	}
-	msg_len = msgrcv(*qid, &message, sizeof(struct msgbuf), 1, 0);
-	if (msg_len < 0) {
-		wprintw(win, "Message queue issue\n");
-		wrefresh(win);
-		wgetch(win);
-		end_program(win, qid, &message);
-	}
-	if (message.msgcontent.type == UNREGISTER) {
-		wprintw(win, "Unable to register\n");
-		wrefresh(win);
-		wgetch(win);
-        	// remove message queue
-        	remove_msgq(*qid);
-		endwin();
-		exit(1);
-	}
-	/*
-	if (message.msgcontent.type == REGISTER) {
-		wprintw(win, "Server Registeration Successful\n");
-		wgetch(win);
-		wrefresh(win);
-	}
-	*/	
+	do {
+		msg_len = msgrcv(qid[0], &message, sizeof(struct msgbuf), 1, 0);
+		if (msg_len < 0) {
+			wprintw(win, "Error: Message queue issue\n");
+			wrefresh(win);
+			wgetch(win);
+			end_program(win, qid, &message);
+		}
+		if (message.msgcontent.type == UNREGISTER) {
+			wprintw(win, "Unable to register\n");
+			wrefresh(win);
+			wgetch(win);
+			// remove message queue
+			remove_msgq(*qid);
+			endwin();
+			exit(1);
+		}
+	} while(message.msgcontent.type != REGISTER);	
 
 
 
@@ -94,19 +90,13 @@ int main() {
 	
 
         DIR *dp;
-        char files[MAX_FILE][STR_LEN]; // text file list
-	int find, fnum;
-	void *shmaddr;
+        struct dirent file;
+        int find;
+	caddr_t shmaddr;
 
-        // print txt files of current directory
+        // Get user input of what file to send
         dp = opendir(".");
-	fnum = get_txt_files(dp, files);
-	do {
-        	print_txt_files(win, dp, files, fnum);
-		find = get_int(win);
-	} while(!is_in_range(find, 0, fnum)); 
-	wclear(win);
-	wrefresh(win);
+	file = choose_file(win, dp, &find);
 
 	// exit if user canceled
 	if (find == 0) {
@@ -122,25 +112,25 @@ int main() {
 		exit(1);
 	}
 
-	pid_t pid_list[3]; // pid list to print
-	int qid_list[3];
+	pid_t pid_list[MAX_CLIENT - 1]; // pid list to print
+	int qid_list[MAX_CLIENT - 1];
 	int list_n = 0;
-	while(1) {
-		msg_len = msgrcv(*qid, &message, sizeof(struct msgbuf), 1, 0);
-		if (msg_len == -1) {
-			wprintw(win, "Error: unable to receive message\n");
-			wgetch(win);
-			//end_program(win, qid, &message);
-		}
-		if (message.msgcontent.type == GET_PIDS) {
-			if (message.msgcontent.qid == 0) {
-				break;
-			}
-			pid_list[list_n++] = message.msgcontent.pid;
-			qid_list[list_n++] = message.msgcontent.qid;
-			wprintw(win, "Received %d\n", message.msgcontent.pid);
-		}
-	} 
+	int qid_r = qid[0];
+	int qid_s = qid[1];
+	list_n = receive_pid_list(win, qid[0], &message, pid_list, qid_list);
+	// the value of qid changes for some unknown reason at this point
+	qid[0] = qid_r;
+	qid[1] = qid_s;
+	wprintw(win, "Recepton qid: %d\n", qid[0]);
+	wgetch(win);
+	
+	
+	// if error occured during reception
+	if (list_n < 0) {
+		wprintw(win, "Error: Unable to receive message\n");
+		wgetch(win);
+		end_program(win, qid, &message);
+	}
 	// if there is no other client registered in server
 	if (!list_n) {
 		wprintw(win, "No other client to send fax\n");
@@ -150,50 +140,66 @@ int main() {
 
 	// print the received pid list and let the user choose
 	int rcvr_ind = chooseOpt(win, pid_list, list_n);
-
-	// set message to send server
-	message.msgcontent.type = SEND_FAX;
-	message.msgcontent.pid = getpid();
-	message.msgcontent.qid = keynum;
-	message.msgcontent.addr = NULL;
-
-	// send message to server to give shared memory address
-	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
-		perror("msgsnd");
-		exit(1);
-	}
-
-	// receive the shared memory address
-	msg_len = msgrcv(*qid, &message, sizeof(struct msgbuf), 1, 0);
-	if (msg_len == -1) {
-		wprintw(win, "Error: unable to receive message\n");
+	wclear(win);
+	
+	wprintw(win, "Receiver Selected\n");
+	
+	int fd;
+	caddr_t addr;
+	struct stat statbuf;
+	
+	// Open file to share
+	if (stat(file.d_name, &statbuf) == -1) {
+		wprintw(win, "Error: stat failed\n");
 		wgetch(win);
 		end_program(win, qid, &message);
 	}
-	wprintw(win, "Received shared memory address\n");
-	shmaddr = message.msgcontent.addr;
-	
-	// Put the content of the file in shmaddr
-	int fd, file_len;
-	fd = open(files[find], O_RDONLY);
-	if (fd = -1) {
+	if ((fd = open(file.d_name, O_RDWR)) == -1) {
 		wprintw(win, "Error: unable to open file\n");
+		wgetch(win);
+		end_program(win, qid, &message);
 	}
 	
-	file_len = read(fd, shmaddr, SHARED_MEMORY_SIZE);
-	if (file_len == -1) {
-		wprintw(win, "Error: unable to read file\n");
+	// assign memory and write the file
+	addr = mmap(NULL, SHARED_MEMORY_SIZE, 
+		PROT_READ|PROT_WRITE, MAP_SHARED, fd, (off_t)0);
+	if (addr == MAP_FAILED) {
+		wprintw(win, "Error: mmap failed\n");
+		wgetch(win);
+		end_program(win, qid, &message);
 	}
+	close(fd);
+	closedir(dp);
 	
-	// Send message to server that the file is all wirtten on the shared memory
-	message.msgcontent.qid = qid_list[rcvr_ind];
-	if (msgsnd(qid[1], (void *)&message, sizeof(struct msgbuf), 0) == -1) {
-		perror("msgsnd");
-		exit(1);
-	}
 
-        wgetch(win);
-        closedir(dp);
+	// set message to send server
+	message.msgcontent.type = SEND_FAX;
+	message.msgcontent.pid = pid_list[rcvr_ind];
+	message.msgcontent.qid = qid_r;
+	message.msgcontent.addr = addr;
+	
+	wprintw(win, "Message set\n");
+	
+
+	// send message to server to share memory with receiver
+	if (msgsnd(qid_s, (void *)&message, sizeof(struct msgbuf), 0) == -1) {
+		wprintw(win, "Error: Unable to send message");
+		wgetch(win);
+		end_program(win, qid, &message);
+	}
+	
+	wprintw(win, "Message sent\n");
+	wprintw(win, "qid_r = %d\n", qid_r);
+	wprintw(win, "qid[0] = %d, qid[1] = %d\n", qid[0], qid[1]);
+	wgetch(win);
+	
+	msg_len = msgrcv(qid[0], &message, sizeof(struct msgbuf), 1, 0);
+	if (msg_len < 0) {
+		wprintw(win, "Error: Message queue issue\n");
+		wrefresh(win);
+		wgetch(win);
+		end_program(win, qid, &message);
+	}
 
 	end_program(win, qid, &message); 
 
@@ -225,14 +231,34 @@ void remove_msgq(int qid) {
 	}
 }
 
+// let the user choose which file to send
+// return the struct dirent of the file
+struct dirent choose_file(WINDOW *window, DIR *dp, int *file_ind) {
+	int get_txt_files(DIR *dp, struct dirent **list);
+	void print_txt_files(WINDOW *window, DIR *dp, struct dirent **list, int size);
+	struct dirent *files[MAX_FILE]; // text file list
+	
+	int file_num = get_txt_files(dp, files);
+	*file_ind = -1;
+	do {
+        	print_txt_files(window, dp, files, file_num);
+		*file_ind = get_int(window);
+	} while(!is_in_range(*file_ind, 0, file_num)); 
+	wclear(window);
+	wrefresh(window);
+	
+	return *(files[(*file_ind)-1]);
+}
+
+
 // print text files in inode list
 // return the number of files
-void print_txt_files(WINDOW *window, DIR *dp, char list[][STR_LEN], int size) {
+void print_txt_files(WINDOW *window, DIR *dp, struct dirent **list, int size) {
 	wclear(window);
 
 	for (int i = 0; i < size; i++) {
 		wprintw(window, "%d ", i+1);
-                wprintw(window, "%s\n", list[i]);
+                wprintw(window, "%s\n", list[i]->d_name);
         }
 	wprintw(window, "Which file do you want to send?(0 is for cancel)\n");
         //wrefresh(window);
@@ -240,7 +266,7 @@ void print_txt_files(WINDOW *window, DIR *dp, char list[][STR_LEN], int size) {
 
 // put text files of dp in the inode list
 // return the number of files
-int get_txt_files(DIR *dp, char list[][STR_LEN]) {
+int get_txt_files(DIR *dp, struct dirent **list) {
 	int ends_txt(char *str, int size); 
 	struct dirent *dent;
         int size;
@@ -249,12 +275,8 @@ int get_txt_files(DIR *dp, char list[][STR_LEN]) {
         while ((dent = readdir(dp))) {
                 size = strlen(dent->d_name);
                 if (ends_txt(dent->d_name, size)) {
-                	int i;
-                	for (i=0; i < size; i++) {
-                        	*(*(list+file_num)+i) = *((dent->d_name)+i);
-                        }
-                        *(*(list+file_num)+i) = '\0';
-                        file_num++;
+                	*(list+file_num) = dent;
+                       file_num++;
                 }
         }
 
@@ -283,6 +305,31 @@ char *getLine(WINDOW *window, char *buf, int size) {
 int get_int(WINDOW *window) {
 	char buf[8];
 	return atoi(getLine(window, buf, 8));
+}
+
+// Receive pid list from server
+int receive_pid_list(WINDOW *window, int qid, struct msgbuf *message, pid_t *pids, int *qids) {
+	int msg_len;
+	int num = 0;
+	while(1) {
+		//wprintw(window, "My qid: %d\nServer qid: %d\n", qid[0], qid[1]);
+		msg_len = msgrcv(qid, message, sizeof(struct msgbuf), 1, 0);
+		wprintw(window, "### message received\n");
+		//wprintw(window, "My qid: %d\nServer qid: %d\n", qid[0], qid[1]);
+		if (msg_len == -1) {
+			return -1;
+		}
+		if (message->msgcontent.type == GET_PIDS) {
+			if (message->msgcontent.pid == 0) {
+				break;
+			}
+			pids[num] = message->msgcontent.pid;
+			qids[num++] = message->msgcontent.qid;
+			wprintw(window, "  Received %d\n", message->msgcontent.pid);
+			wprintw(window, "  pid_list[%d] = %d\n", num, pids[num - 1]);
+		}
+	}
+	return num;
 }
 
 // Get an option from user
@@ -327,7 +374,6 @@ int chooseOpt(WINDOW *window, pid_t *options, int optlen) {
 			break;
 		}
 	}
-	wclear(window);
 
 	return highlight;
 }
