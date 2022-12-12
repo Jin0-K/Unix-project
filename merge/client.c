@@ -43,7 +43,7 @@ void unregister_server();
 WINDOW* pLabelWin; // 출력 라벨 윈도우
 int msgid; // Message queue for printer
 int cli_keynum;
-int qid[2];
+int qid[2]; // Message queue for fax
 
 
 
@@ -95,7 +95,18 @@ int main(void){
 	
 	// 시그널 등록
 	signal(SIGUSR1, printer);
-	signal(SIGALRM, sig_handler_getfax);
+	signal(SIGUSR2, sig_handler_getfax);
+	/*
+	struct sigaction act_usr2;
+	sigemptyset(&act_usr2.sa_mask);
+	act_usr2.sa_flags = SA_SIGINFO || SA_ONSTACK;
+	act_usr2.sa_sigaction = (void (*)(int, siginfo_t *, void *))sig_handler_getfax;
+	if (sigaction(SIGUSR2, &act_usr2, (struct sigaction *)NULL) < 0) {
+		endwin();
+		perror("sigaction");
+		exit(1);
+	}
+	*/
 
 	// Create message queue for printer
         key_t key = ftok(keyfile, keynum);
@@ -108,13 +119,14 @@ int main(void){
         // Create message queue for fax
         create_msgq();
         
-	// register in server
 	struct message msgf;
+	// Initialize msgf
 	msgf.mtype = 1;
 	msgf.content = (struct cont) { 
-					.type = REGISTER, 
-					.pid = getpid(),
-					.qid = qid[0] };
+				.type = REGISTER, 
+				.pid = getpid(),
+				.qid = qid[0] };
+	// register in server
 	if (msgsnd(qid[1], (void *)&msgf, sizeof(struct message), 0) == -1) {
 		endwin();
 		perror("msgsnd");
@@ -140,7 +152,7 @@ int main(void){
 	while((choice = SelectMenu(menuWin, menu, numOfMenu)) != numOfMenu-1){ 
 	//메뉴 선택. 종료를 선택하지 않을 동안.
 
-		// 파일 몰록
+		// File list
 		char* files[MAX_FILE];
 		int fileNum;
 		Msgbuf msg;
@@ -165,6 +177,7 @@ int main(void){
 					break;
 				}
 				// Let the user choose where to send
+				print("Choose where to send\n");
 				rcvr_ind = choosePid(menuWin, menuH, menuW, pid_list, list_n);
 				// Create shared memory to put file
 				int shmid;
@@ -200,6 +213,7 @@ int main(void){
 				strcpy(msg.mtext, files[choice]);
 				msgsnd(msgid, (void*)&msg, SIZE, IPC_NOWAIT);
 				kill(getpid(), SIGUSR1);
+				
 				break;
 			case 2: // 파일에 출력
 				print(">> PRINT AT NEW FILE\n");
@@ -220,6 +234,7 @@ int main(void){
 
 				printNewFile(files[choice]);
 				//winResize(menuWin, menuH+5, menuW);
+				
 				break;
 			default:
 				printw("deault");
@@ -343,11 +358,9 @@ void wEraseWin(WINDOW* win, int y, int x)
 
 void printFax(int shmid) {
 	char *shmaddr = shmat(shmid, NULL, SHM_RDONLY);
-	char buf[SHARED_MEMORY_SIZE];
-	strcpy(buf, shmaddr);
 
 	print("--------------------------\n");
-		print(buf);
+		print(shmaddr);
 		usleep(10000);
 	print("--------------------------\n");
 	wprintw(pLabelWin, "Fax Reception Complete\n");
@@ -485,14 +498,13 @@ void printer(int signo){
 // operation when received GET_FAX
 void sig_handler_getfax(int signo) {
 	void send_msg_printer(struct message *message);
-	int msg_len;
 	struct message msg;
 	
 	// Receive message
-	msg_len = msgrcv(qid[0], &msg, sizeof(struct message), 1, 0);
+	msgrcv(qid[0], &msg, sizeof(struct message), 1, 0);
 	send_msg_printer(&msg);
 	raise(SIGUSR1);
-	return;
+	print("Signal Handler Done\n");
 }
 
 // Send the received message to printer
@@ -689,6 +701,8 @@ int chooseFile(WINDOW *window, struct dirent **options, int optlen) {
 // send message to server to give pid list
 void request_pids(struct message *msg) {
 	msg->content.type = GET_PIDS;
+	msg->content.qid = getpid();
+	msg->content.qid = qid[0];
 	if (msgsnd(qid[1], (void *)msg, sizeof(struct message), 0) == -1) {
 		perror("msgsnd");
 		exit(1);

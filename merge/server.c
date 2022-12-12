@@ -99,7 +99,7 @@ int main() {
 					// message will be sent to the process that will receive file
 					msgsnd(qid_of_pid(pid_list, message.content.pid),
 						(void *)&message, sizeof(struct message), 0);
-					kill(message.content.pid, SIGALRM);
+					kill(message.content.pid, SIGUSR2);
 				}
 				break;
 			
