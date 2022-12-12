@@ -360,7 +360,8 @@ void printFax(int shmid) {
 	char *shmaddr = shmat(shmid, NULL, SHM_RDONLY);
 
 	print("--------------------------\n");
-		print(shmaddr);
+	print("temp msg\n");
+		//print(shmaddr);
 		usleep(10000);
 	print("--------------------------\n");
 	wprintw(pLabelWin, "Fax Reception Complete\n");
@@ -501,11 +502,17 @@ void sig_handler_getfax(int signo) {
 	struct message msg;
 	
 	// Receive message
-	msgrcv(qid[0], &msg, sizeof(struct message), 1, 0);
+
+	msgrcv(qid[0], &msg, sizeof(struct cont), 1, 0);
+	//char buf[50];
+	//sprintf(buf, "%ld\n", msg.mtype);
+	//print(buf);
 	send_msg_printer(&msg);
 	raise(SIGUSR1);
-	print("Signal Handler Done\n");
+	print("Signal Handler Done1\n");
 }
+
+
 
 // Send the received message to printer
 void send_msg_printer(struct message *message) {
