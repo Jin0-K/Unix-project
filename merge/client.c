@@ -190,7 +190,7 @@ int main(void){
 				if (send_fax(&msgf, pid_list[rcvr_ind], shmid) == -1) {
 					print("Unable to send message\n");
 				}
-				print("File has sent\n");
+				print("Fax Sent!\n");
 				
 				break;
 			case 1: // 출력
@@ -359,13 +359,17 @@ void wEraseWin(WINDOW* win, int y, int x)
 
 void printFax(int shmid) {
 	char *shmaddr = shmat(shmid, NULL, SHM_RDONLY);
+	int len = strlen(shmaddr);
+	int i = 0;
 
 	print("--------------------------\n");
-	print(shmaddr);
-	usleep(10000);
+	do {
+		wprintw(pLabelWin, "%c", *(shmaddr+i));
+		wrefresh(pLabelWin);
+		usleep(1000);
+	} while (++i < len);
 	print("--------------------------\n");
 	wprintw(pLabelWin, "Fax Reception Complete\n");
-	wrefresh(pLabelWin);
 	
 	// dettach and remove shared memory
 	shmdt(shmaddr);
@@ -522,7 +526,6 @@ void send_msg_printer(int signo) {
 	msgrcv(qid[0], &msg_rcv, sizeof(struct message), 1, 0);
 	msg_snd.mtype = FAX;
 	sprintf(msg_snd.mtext, "%d", msg_rcv.content.qid);
-	wprintw(pLabelWin, "%s\n", msg_snd.mtext);
 	
 	// send the message to printer message queue
 	if (msgsnd(msgid, (void *)&msg_snd, SIZE, IPC_NOWAIT) == -1) {
