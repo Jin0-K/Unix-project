@@ -28,7 +28,8 @@ void printNewFile(char* file);
 void printer(int signo);
 
 // Functions for fax
-void sig_handler_getfax(int signo);
+//void sig_handler_getfax(int signo);
+void send_msg_printer(int signo);
 void create_msgq(); 
 void remove_msgq(); 
 /* void register_server(struct message *msg); */
@@ -95,7 +96,7 @@ int main(void){
 	
 	// 시그널 등록
 	signal(SIGUSR1, printer);
-	signal(SIGUSR2, sig_handler_getfax);
+	signal(SIGUSR2, send_msg_printer);
 	/*
 	struct sigaction act_usr2;
 	sigemptyset(&act_usr2.sa_mask);
@@ -360,9 +361,8 @@ void printFax(int shmid) {
 	char *shmaddr = shmat(shmid, NULL, SHM_RDONLY);
 
 	print("--------------------------\n");
-	print("temp msg\n");
-		//print(shmaddr);
-		usleep(10000);
+	print(shmaddr);
+	usleep(10000);
 	print("--------------------------\n");
 	wprintw(pLabelWin, "Fax Reception Complete\n");
 	wrefresh(pLabelWin);
@@ -492,39 +492,43 @@ void printer(int signo){
 			printFax(atoi(rcvMsg.mtext));
 			break;
 	}
-	print("Printer over\n");
 }
 
 
 // operation when received GET_FAX
+/* Doesn't work for some unknown reason
 void sig_handler_getfax(int signo) {
 	void send_msg_printer(struct message *message);
 	struct message msg;
 	
 	// Receive message
 
-	msgrcv(qid[0], &msg, sizeof(struct cont), 1, 0);
-	//char buf[50];
-	//sprintf(buf, "%ld\n", msg.mtype);
-	//print(buf);
+	msgrcv(qid[0], &msg, sizeof(msg.content), 1, 0);
+	wprintw(pLabelWin, "Received message size: %d\nReceived shmid: %d\n", 
+		sizeof(msg), sizeof(msg.content.qid));
 	send_msg_printer(&msg);
 	raise(SIGUSR1);
-	print("Signal Handler Done1\n");
+	print("Signal Handler Done\n");
 }
-
+*/
 
 
 // Send the received message to printer
-void send_msg_printer(struct message *message) {
-	Msgbuf msg_send;
+void send_msg_printer(int signo) {
+	struct message msg_rcv;
+	Msgbuf msg_snd;
 	
-	msg_send.mtype = FAX;
-	sprintf(msg_send.mtext, "%d", message->content.qid);
+	// Receive message from server
+	msgrcv(qid[0], &msg_rcv, sizeof(struct message), 1, 0);
+	msg_snd.mtype = FAX;
+	sprintf(msg_snd.mtext, "%d", msg_rcv.content.qid);
+	wprintw(pLabelWin, "%s\n", msg_snd.mtext);
 	
 	// send the message to printer message queue
-	if (msgsnd(msgid, (void *)&msg_send, SIZE, IPC_NOWAIT) == -1) {
+	if (msgsnd(msgid, (void *)&msg_snd, SIZE, IPC_NOWAIT) == -1) {
 		perror("msgsnd");
 	}
+	raise(SIGUSR1);
 }
 
 // create message queues
@@ -708,7 +712,7 @@ int chooseFile(WINDOW *window, struct dirent **options, int optlen) {
 // send message to server to give pid list
 void request_pids(struct message *msg) {
 	msg->content.type = GET_PIDS;
-	msg->content.qid = getpid();
+	msg->content.pid = getpid();
 	msg->content.qid = qid[0];
 	if (msgsnd(qid[1], (void *)msg, sizeof(struct message), 0) == -1) {
 		perror("msgsnd");
