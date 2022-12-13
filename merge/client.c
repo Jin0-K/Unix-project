@@ -613,6 +613,8 @@ int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file) {
 	// exit if user canceled
 	if (file_ind == file_num) {
 		print("Canceled to choose\n");
+		wEraseWin(mWin, file_num+3, x);
+		winResize(mWin, y, x);
 		return -1;
 	}
 	
@@ -659,52 +661,66 @@ int ends_txt(char *str, int size) {
 
 // Get an option input from user
 int chooseFile(WINDOW *window, struct dirent **options, int optlen) {
-	int choice;
-	int file_num = optlen + 1;
+	//int choice;
+	//int file_num = optlen + 1;
+	//int highlight = 0;
+	
 	int highlight = 0;
+	int i;
+	int direction;
 
 	box(window, 0, 0);
 
 	while (1) {
-		int i;
 		for (i = 0; i < optlen; i++) {
 			if (i == highlight) {
 				wattron(window, A_REVERSE);
 			}
-			mvwprintw(window, i+2, 1, "%s", options[i]->d_name);
+			wmove(window, i+1, 1);
+			wprintw(window, options[i]->d_name);
 			wattroff(window, A_REVERSE);
+			//mvwprintw(window, i+2, 1, "%s", options[i]->d_name);
+			//wattroff(window, A_REVERSE);
 		}
+		
+		/*
 		if (i == highlight) {
 			wattron(window, A_REVERSE);
 		}
 		mvwprintw(window, i+2, 1, "Cancel");
 		wattroff(window, A_REVERSE);
 		choice = wgetch(window);
+		*/
+		if (i == highlight) {
+			wattron(window, A_REVERSE);
+		}
+		wmove(window, i+1, 1);
+		wprintw(window, "CANCEL");
+		wattroff(window, A_REVERSE);
+		
+		direction = wgetch(window);
 
-		switch (choice) {
-			case KEY_UP :
+		switch(direction){
+			case KEY_UP:
 				highlight--;
-				// When the highlight get out of range
-				if (highlight < 0) {
-					highlight = 0;
-				}
+				if(highlight < 0)
+					highlight = optlen;
 				break;
-
-			case KEY_DOWN :
+				
+			case KEY_DOWN:
 				highlight++;
-				// When the highlight get out of range
-				if (highlight > file_num) {
-					highlight = file_num;
-				}
+				if(highlight > optlen)
+					highlight = 0;
 				break;
 
-			default :
+			default:
 				break;
 		}
-		if (choice == 10) {
+
+		if(direction == 10) //엔터 치면 종료.
 			break;
-		}
-	}
+			
+	}	
 
 	return highlight;
 }	
@@ -740,15 +756,22 @@ int receive_pids(struct message *message, pid_t *pids) {
 }
 
 
-int choosePid(WINDOW *window, int win_y, int win_x, pid_t *options, int optlen) {
+int choosePid(WINDOW* window, int win_y, int win_x, pid_t* options, int optlen) {
+	/*
 	int choice;
 	int highlight = 0;
+	*/
+	
+	int direction;
+	int highlight = 0;
+	int i;
 
 	// Set the window size
 	wEraseWin(window, win_y, win_x);
 	winResize(window, optlen+2, win_x);
 
 	while (1) {
+		/*
 		for (int i = 0; i < optlen; i++) {
 			if (i == highlight) {
 				wattron(window, A_REVERSE);
@@ -756,31 +779,37 @@ int choosePid(WINDOW *window, int win_y, int win_x, pid_t *options, int optlen) 
 			mvwprintw(window, i+2, 1, "%d", (int)options[i]);
 			wattroff(window, A_REVERSE);
 		}
-		choice = wgetch(window);
+		*/
+		for(i=0; i<optlen; i++){
+			if(i == highlight){
+				wattron(window, A_REVERSE);
+			}
+			wmove(window, i+1, 1);
+			wprintw(window, "%d", (int)options[i]);
+			wattroff(window, A_REVERSE);
+		}
+		
+		direction = wgetch(window);
 
-		switch (choice) {
-			case KEY_UP :
+		switch(direction){
+			case KEY_UP:
 				highlight--;
-				// When the highlight get out of range
-				if (highlight < 0) {
-					highlight = 0;
-				}
+				if(highlight < 0)
+					highlight = optlen-1;
 				break;
-
-			case KEY_DOWN :
+				
+			case KEY_DOWN:
 				highlight++;
-				// When the highlight get out of range
-				if (highlight >= optlen) {
-					highlight = optlen - 1;
-				}
+				if(highlight > optlen-1)
+					highlight = 0;
 				break;
 
-			default :
+			default:
 				break;
 		}
-		if (choice == 10) {
+
+		if(direction == 10) //엔터 치면 종료.
 			break;
-		}
 	}
 	
 	// Reset the window size
