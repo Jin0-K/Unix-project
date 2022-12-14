@@ -597,19 +597,27 @@ void register_server(struct message *msg) {
 // return the struct dirent of the file
 int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file) {
 	int get_files(DIR *dp, struct dirent **list);
-	int chooseFile(WINDOW *window, struct dirent **options, int optlen);
-	DIR *dp;
+	int chooseFile(WINDOW *window, struct dirent **files, int fnum);
+	DIR *dir;
 	struct dirent *files[MAX_FILE]; // text file list
 	int file_num, file_ind;
 	
-	// open directory
-	dp = opendir(".");
-	// get the number of files
-	file_num = get_files(dp, files);
-	closedir(dp);
+
+	// open current directory
+	dir = opendir(".");
+	if(dir == NULL){
+		perror("opendir");
+		exit(1);
+	}
+
+	// get files
+	file_num = get_files(dir, files);
+	closedir(dir);
+
+	
 	// set the size of menu window as the number of files
 	wEraseWin(mWin, y, x);
-	winResize(mWin, file_num + 3, x);
+	winResize(mWin, file_num + 4, x);
 	// select file
 	file_ind = chooseFile(mWin, files, file_num);
 	
@@ -632,41 +640,32 @@ int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file) {
 	
 	
 	return 0;
+
 }
 
-// put text files of dp in the inode list
-// return the number of files
 int get_files(DIR *dp, struct dirent **list) {
-	int ends_txt(char *str, int size); 
 	struct dirent *dent;
-        int size;
-        int file_num = 0;
-
-        while ((dent = readdir(dp))) {
-                size = strlen(dent->d_name);
-                if (ends_txt(dent->d_name, size)) {
-                	*(list+file_num) = dent;
-                       file_num++;
-                }
-        }
-
-        return file_num;
+	int fnum = 0;
+	
+	while((dent = readdir(dp)) && (fnum < MAX_FILE)) {
+		if(strcmp(dent->d_name, ".") == 0){
+			continue;
+		}
+		else if(strcmp(dent->d_name, "..") == 0){
+			continue;
+		}
+		else if(strchr(dent->d_name, '.') == NULL){
+			continue;
+		}
+		*(list + fnum) = dent;
+		fnum++;
+	}
+	return fnum;
 }
 
-// check if the string ends with ".txt"
-int ends_txt(char *str, int size) {
-        // check if the last 4 characters of str are ".txt"
-        if (strcmp((str+size-4), ".txt") == 0) {
-                return 1;
-        }
-        return 0;
-}
 
 // Get an option input from user
 int chooseFile(WINDOW *window, struct dirent **options, int optlen) {
-	//int choice;
-	//int file_num = optlen + 1;
-	//int highlight = 0;
 	
 	int highlight = 0;
 	int i;
@@ -682,18 +681,7 @@ int chooseFile(WINDOW *window, struct dirent **options, int optlen) {
 			wmove(window, i+1, 1);
 			wprintw(window, options[i]->d_name);
 			wattroff(window, A_REVERSE);
-			//mvwprintw(window, i+2, 1, "%s", options[i]->d_name);
-			//wattroff(window, A_REVERSE);
 		}
-		
-		/*
-		if (i == highlight) {
-			wattron(window, A_REVERSE);
-		}
-		mvwprintw(window, i+2, 1, "Cancel");
-		wattroff(window, A_REVERSE);
-		choice = wgetch(window);
-		*/
 		if (i == highlight) {
 			wattron(window, A_REVERSE);
 		}
@@ -760,11 +748,6 @@ int receive_pids(struct message *message, pid_t *pids) {
 
 
 int choosePid(WINDOW* window, int win_y, int win_x, pid_t* options, int optlen) {
-	/*
-	int choice;
-	int highlight = 0;
-	*/
-	
 	int direction;
 	int highlight = 0;
 	int i;
@@ -774,15 +757,6 @@ int choosePid(WINDOW* window, int win_y, int win_x, pid_t* options, int optlen) 
 	winResize(window, optlen+2, win_x);
 
 	while (1) {
-		/*
-		for (int i = 0; i < optlen; i++) {
-			if (i == highlight) {
-				wattron(window, A_REVERSE);
-			}
-			mvwprintw(window, i+2, 1, "%d", (int)options[i]);
-			wattroff(window, A_REVERSE);
-		}
-		*/
 		for(i=0; i<optlen; i++){
 			if(i == highlight){
 				wattron(window, A_REVERSE);
