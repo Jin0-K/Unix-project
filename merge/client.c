@@ -28,16 +28,16 @@ void printNewFile(char* file);
 void printer(int signo);
 
 // Functions for fax
-//void sig_handler_getfax(int signo);
 void send_msg_printer(int signo);
 void create_msgq(); 
 void remove_msgq(); 
 /* void register_server(struct message *msg); */
-int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file);
+//int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file);
+int chooseFile(WINDOW *window, char **options, int optlen);
 void request_pids(struct message *msg);
 int receive_pids(struct message *message, pid_t *pids);
 int choosePid(WINDOW *window, int win_y, int win_x, pid_t *options, int optlen); 
-int put_file_shm(struct dirent file, int *shmid, char *shmaddr);
+int put_file_shm(char *file, int *shmid, char *shmaddr);
 int send_fax(struct message *msg, pid_t receiver, int shmid);
 void unregister_server();
 
@@ -48,7 +48,7 @@ int qid[2]; // Message queue for fax
 
 
 
-int main(void){
+int main(void) {
 
 	initscr();
 	cbreak();
@@ -97,17 +97,6 @@ int main(void){
 	// 시그널 등록
 	signal(SIGUSR1, printer);
 	signal(SIGUSR2, send_msg_printer);
-	/*
-	struct sigaction act_usr2;
-	sigemptyset(&act_usr2.sa_mask);
-	act_usr2.sa_flags = SA_SIGINFO || SA_ONSTACK;
-	act_usr2.sa_sigaction = (void (*)(int, siginfo_t *, void *))sig_handler_getfax;
-	if (sigaction(SIGUSR2, &act_usr2, (struct sigaction *)NULL) < 0) {
-		endwin();
-		perror("sigaction");
-		exit(1);
-	}
-	*/
 
 	// Create message queue for printer
         key_t key = ftok(keyfile, keynum);
@@ -162,11 +151,21 @@ int main(void){
 			case 0: // 팩스
 				print(">> SEND FAX\n");
 				
+				// read files from the current directory
+				fileNum = getFiles(files);
+				// resize the menu box
+				wEraseWin(menuWin, menuH, menuW);
+				winResize(menuWin, fileNum + 4, menuW);
 				// Let the user choose which file to send
-				struct dirent file;
-				if (choose_file(printWin, menuWin, menuH, menuW, &file) == -1) {
+				choice = chooseFile(menuWin, files, fileNum);
+				if (choice == fileNum) { // if user cooses to cancel
+					print("Canceled to choose\n");
 					break;
 				}
+				// reset menu box to original size
+				wEraseWin(menuWin, fileNum+3, menuW);
+				winResize(menuWin, menuH, menuW);
+				
 				// Get pid list from server
 				pid_t pid_list[MAX_CLIENT - 1]; // pid list to print
 				int list_n = 0;
@@ -183,7 +182,7 @@ int main(void){
 				// Create shared memory to put file
 				int shmid;
 				char *addr;
-				if (put_file_shm(file, &shmid, addr) == -1) {
+				if (put_file_shm(files[choice], &shmid, addr) == -1) {
 					break;
 				}
 				// send fax
@@ -203,6 +202,10 @@ int main(void){
 				winResize(menuWin, fileNum+2, menuW);
 				// 출력할 파일 선택
 				choice = SelectMenu(menuWin, files, fileNum);
+				if (choice == fileNum) { // if user cooses to cancel
+					print("Canceled to choose\n");
+					break;
+				}
 				print("choice: ");
 				print(files[choice]);
 				print("\n");
@@ -226,6 +229,10 @@ int main(void){
                                 winResize(menuWin, fileNum+2, menuW);
                                 // 출력할 파일 선택
                                 choice = SelectMenu(menuWin, files, fileNum);
+				if (choice == fileNum) { // if user cooses to cancel
+					print("Canceled to choose\n");
+					break;
+				}
                                 print("choice: ");
                                 print(files[choice]);
                                 print("\n");
@@ -593,23 +600,32 @@ void register_server(struct message *msg) {
 }
 */
 
+/*
 // let the user choose which file to send
 // return the struct dirent of the file
 int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file) {
 	int get_files(DIR *dp, struct dirent **list);
-	int chooseFile(WINDOW *window, struct dirent **options, int optlen);
-	DIR *dp;
+	int chooseFile(WINDOW *window, struct dirent **files, int fnum);
+	DIR *dir;
 	struct dirent *files[MAX_FILE]; // text file list
 	int file_num, file_ind;
 	
-	// open directory
-	dp = opendir(".");
-	// get the number of files
-	file_num = get_files(dp, files);
-	closedir(dp);
+
+	// open current directory
+	dir = opendir(".");
+	if(dir == NULL){
+		perror("opendir");
+		exit(1);
+	}
+
+	// get files
+	file_num = get_files(dir, files);
+	closedir(dir);
+
+	
 	// set the size of menu window as the number of files
 	wEraseWin(mWin, y, x);
-	winResize(mWin, file_num + 3, x);
+	winResize(mWin, file_num + 4, x);
 	// select file
 	file_ind = chooseFile(mWin, files, file_num);
 	
@@ -632,41 +648,32 @@ int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file) {
 	
 	
 	return 0;
+
 }
 
-// put text files of dp in the inode list
-// return the number of files
 int get_files(DIR *dp, struct dirent **list) {
-	int ends_txt(char *str, int size); 
 	struct dirent *dent;
-        int size;
-        int file_num = 0;
-
-        while ((dent = readdir(dp))) {
-                size = strlen(dent->d_name);
-                if (ends_txt(dent->d_name, size)) {
-                	*(list+file_num) = dent;
-                       file_num++;
-                }
-        }
-
-        return file_num;
+	int fnum = 0;
+	
+	while((dent = readdir(dp)) && (fnum < MAX_FILE)) {
+		if(strcmp(dent->d_name, ".") == 0){
+			continue;
+		}
+		else if(strcmp(dent->d_name, "..") == 0){
+			continue;
+		}
+		else if(strchr(dent->d_name, '.') == NULL){
+			continue;
+		}
+		*(list + fnum) = dent;
+		fnum++;
+	}
+	return fnum;
 }
-
-// check if the string ends with ".txt"
-int ends_txt(char *str, int size) {
-        // check if the last 4 characters of str are ".txt"
-        if (strcmp((str+size-4), ".txt") == 0) {
-                return 1;
-        }
-        return 0;
-}
+*/
 
 // Get an option input from user
-int chooseFile(WINDOW *window, struct dirent **options, int optlen) {
-	//int choice;
-	//int file_num = optlen + 1;
-	//int highlight = 0;
+int chooseFile(WINDOW *window, char **options, int optlen) {
 	
 	int highlight = 0;
 	int i;
@@ -680,20 +687,9 @@ int chooseFile(WINDOW *window, struct dirent **options, int optlen) {
 				wattron(window, A_REVERSE);
 			}
 			wmove(window, i+1, 1);
-			wprintw(window, options[i]->d_name);
+			wprintw(window, options[i]);
 			wattroff(window, A_REVERSE);
-			//mvwprintw(window, i+2, 1, "%s", options[i]->d_name);
-			//wattroff(window, A_REVERSE);
 		}
-		
-		/*
-		if (i == highlight) {
-			wattron(window, A_REVERSE);
-		}
-		mvwprintw(window, i+2, 1, "Cancel");
-		wattroff(window, A_REVERSE);
-		choice = wgetch(window);
-		*/
 		if (i == highlight) {
 			wattron(window, A_REVERSE);
 		}
@@ -760,11 +756,6 @@ int receive_pids(struct message *message, pid_t *pids) {
 
 
 int choosePid(WINDOW* window, int win_y, int win_x, pid_t* options, int optlen) {
-	/*
-	int choice;
-	int highlight = 0;
-	*/
-	
 	int direction;
 	int highlight = 0;
 	int i;
@@ -774,15 +765,6 @@ int choosePid(WINDOW* window, int win_y, int win_x, pid_t* options, int optlen) 
 	winResize(window, optlen+2, win_x);
 
 	while (1) {
-		/*
-		for (int i = 0; i < optlen; i++) {
-			if (i == highlight) {
-				wattron(window, A_REVERSE);
-			}
-			mvwprintw(window, i+2, 1, "%d", (int)options[i]);
-			wattroff(window, A_REVERSE);
-		}
-		*/
 		for(i=0; i<optlen; i++){
 			if(i == highlight){
 				wattron(window, A_REVERSE);
@@ -822,16 +804,16 @@ int choosePid(WINDOW* window, int win_y, int win_x, pid_t* options, int optlen) 
 	return highlight;
 }
 
-int put_file_shm(struct dirent file, int *shmid, char *shmaddr) {
+int put_file_shm(char *file, int *shmid, char *shmaddr) {
 	int fd;
 	struct stat statbuf;
 	
 	// Open file to share
-	if (stat(file.d_name, &statbuf) == -1) {
+	if (stat(file, &statbuf) == -1) {
 		print("Error: stat failed\n");
 		return -1;
 	}
-	if ((fd = open(file.d_name, O_RDWR)) == -1) {
+	if ((fd = open(file, O_RDWR)) == -1) {
 		print("Error: unable to open file\n");
 		return -1;
 	}
