@@ -158,13 +158,14 @@ int main(void) {
 				winResize(menuWin, fileNum + 4, menuW);
 				// Let the user choose which file to send
 				choice = chooseFile(menuWin, files, fileNum);
+				// reset menu box to original size
+				wEraseWin(menuWin, fileNum+3, menuW);
+				winResize(menuWin, menuH, menuW);
+				
 				if (choice == fileNum) { // if user cooses to cancel
 					print("Canceled to choose\n");
 					break;
 				}
-				// reset menu box to original size
-				wEraseWin(menuWin, fileNum+3, menuW);
-				winResize(menuWin, menuH, menuW);
 				
 				// Get pid list from server
 				pid_t pid_list[MAX_CLIENT - 1]; // pid list to print
@@ -199,9 +200,13 @@ int main(void) {
 				fileNum = getFiles(files);
 				// 파일 개수만큼 메뉴창 크기 변경
 				wEraseWin(menuWin, menuH, menuW);
-				winResize(menuWin, fileNum+2, menuW);
+				winResize(menuWin, fileNum+3, menuW);
 				// 출력할 파일 선택
-				choice = SelectMenu(menuWin, files, fileNum);
+				choice = chooseFile(menuWin, files, fileNum);
+				// 원래 메뉴창으로 크기 변경
+				wEraseWin(menuWin, fileNum+3, menuW);
+				winResize(menuWin, menuH, menuW);
+				
 				if (choice == fileNum) { // if user cooses to cancel
 					print("Canceled to choose\n");
 					break;
@@ -209,9 +214,7 @@ int main(void) {
 				print("choice: ");
 				print(files[choice]);
 				print("\n");
-				// 원래 메뉴창으로 크기 변경
-				wEraseWin(menuWin, fileNum+2, menuW);
-				winResize(menuWin, menuH, menuW);
+
 
                         	msg.mtype = STDOUT;
 				strcpy(msg.mtext, files[choice]);
@@ -222,23 +225,24 @@ int main(void) {
 			case 2: // 파일에 출력
 				print(">> PRINT AT NEW FILE\n");
 
-	                        // 파일 목록 가져오기
-                                fileNum = getFiles(files);
-                                // 파일 개수만큼 메뉴창 크기 변경
-                                wEraseWin(menuWin, menuH, menuW);
-                                winResize(menuWin, fileNum+2, menuW);
-                                // 출력할 파일 선택
-                                choice = SelectMenu(menuWin, files, fileNum);
+	                       // 파일 목록 가져오기
+                               fileNum = getFiles(files);
+                               // 파일 개수만큼 메뉴창 크기 변경
+                               wEraseWin(menuWin, menuH, menuW);
+                               winResize(menuWin, fileNum+3, menuW);
+                               // 출력할 파일 선택
+                               choice = chooseFile(menuWin, files, fileNum);
+                               // 원래 메뉴창으로 크기 변경
+                               wEraseWin(menuWin, fileNum+3, menuW);
+                               winResize(menuWin, menuH, menuW);
+                                
 				if (choice == fileNum) { // if user cooses to cancel
 					print("Canceled to choose\n");
 					break;
 				}
-                                print("choice: ");
-                                print(files[choice]);
-                                print("\n");
-                                // 원래 메뉴창으로 크기 변경
-                                wEraseWin(menuWin, fileNum+2, menuW);
-                                winResize(menuWin, menuH, menuW);
+                               print("choice: ");
+                               print(files[choice]);
+                               print("\n");
 
 				printNewFile(files[choice]);
 				//winResize(menuWin, menuH+5, menuW);
