@@ -103,7 +103,7 @@ void printStdout(char* file){
 	strcpy(shmaddr, "--------------------------\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 	
 	// 파일 내용 출력
 	while(fgets(buf, BUFSIZ, fpin) != NULL){
@@ -112,7 +112,7 @@ void printStdout(char* file){
 		shmdt((char*) shmaddr);
 		kill(getppid(), SIGPOLL);
 		
-		usleep(30000);
+		usleep(70000);
 	}
 	
 	// 완료구분선 출력
@@ -122,7 +122,7 @@ void printStdout(char* file){
 	strcpy(shmaddr, completeBuf);
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 
 
 	// 파일 닫기
@@ -206,26 +206,41 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, "--------------------------\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 	
 
 	// 내용 출력.
-	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
-	strcpy(shmaddr, shmaddrFax);
-	shmdt((char*) shmaddr);
-	kill(getppid(), SIGPOLL);
-	usleep(50000);
-	
-	
+	for(int i=0; i<len; i++){
+		shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
+		
+		shmaddr[0] = *(shmaddrFax+i);
+		shmaddr[1] = '\0';
+		
+		shmdt((char*) shmaddr);
+		kill(getppid(), SIGPOLL);
+		usleep(1000);
+	}
 	/*
 	do {
+		
 		wprintw(pLabelWin, "%c", *(shmaddrFax+i));
 		wrefresh(pLabelWin);
 		usleep(1000);
 		
 		
-		usleep(70000);
-	} while (++i < len);
+		shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
+		
+		char str[2];
+		strcpy(str, shmaddrFax+i);
+		str[1] = '\0';
+		i++;
+		
+		strcpy(shmaddr, str);
+		shmdt((char*) shmaddr);
+		kill(getppid(), SIGPOLL);
+		usleep(1000);
+	
+	} while (i < (len-1));
 	*/
 	
 	// 완료구분선 출력
@@ -233,7 +248,7 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, "--------------------------\nFax Reception Complete\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 	
 	// dettach and remove shared memory
 	shmdt(shmaddrFax);
