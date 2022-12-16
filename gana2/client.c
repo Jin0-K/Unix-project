@@ -190,6 +190,8 @@ int main(void) {
 	print("Connected to server\n");
 	
 	onPrinter();
+	
+	// 시그널 등록.
 	signal(SIGPOLL, printerHandler);
 	signal(SIGTSTP, tempHandler);
 	
@@ -479,6 +481,7 @@ void printStdout(char* file){
 
 
 void printer(int signo){
+	/*
 	// 메세지 큐 꺼내오기
 	// 큐 식별자에 따라 if문으로 나눠 다른 함수 실행하기
 	
@@ -495,6 +498,7 @@ void printer(int signo){
 	msgrcv(msgid, &rcvMsg, SIZE, 0, IPC_NOWAIT);
 	//wprintw(pLabelWin, "received msg: %s, type: %ld\n", rcvMsg.mtext, rcvMsg.mtype);
 	//wrefresh(pLabelWin);
+	
 
 	// 타입별로 출력
 	switch(rcvMsg.mtype){
@@ -511,6 +515,9 @@ void printer(int signo){
 			printFax(atoi(rcvMsg.mtext));
 			break;
 	}
+	*/
+	print("fax recieved\n");
+	kill(printerPid, SIGUSR1);
 }
 
 

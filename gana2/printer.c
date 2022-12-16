@@ -15,6 +15,7 @@
 
 void printStdout(char* file);
 void printNewFile(char* file);
+void printFax(int shmid);
 
 int msgid; // 메세지큐 식별자
 int shmid; // 공유메모리 식별자
@@ -44,19 +45,20 @@ void print_handler(int signo){
 			printNewFile(rcvMsg.mtext);
 			break;
 		case STDOUT:
-			
 			printStdout(rcvMsg.mtext);
+			sleep(2);
 			break;
 		case FAX:
-			printf("fax!!\n");
+			printFax(atoi(rcvMsg.mtext));
+			sleep(2);
 			break;
 		default:
-			perror("fail to switch..\n");
 			exit(1);
 			break;
 	}	
 }
 
+// 화면에 출력
 void printStdout(char* file){
 
 	// 출력할 파일 열기
@@ -69,13 +71,14 @@ void printStdout(char* file){
 	char buf[BUFSIZ];
 	char* shmaddr;
 	
-	// 파일 내용 출력.
+	// 시작구분선 출력
 	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
 	strcpy(shmaddr, "--------------------------\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
 	usleep(70000);
 	
+	// 파일 내용 출력
 	while(fgets(buf, BUFSIZ, fpin) != NULL){
 		shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
 		strcpy(shmaddr, buf);
@@ -86,6 +89,7 @@ void printStdout(char* file){
 		usleep(70000);
 	}
 	
+	// 완료구분선 출력
 	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
 	char completeBuf[80];
 	sprintf(completeBuf, "--------------------------\nComplete: %s\n", file);
@@ -101,6 +105,7 @@ void printStdout(char* file){
 	return;
 }
 
+// 복사본 만들기
 void printNewFile(char* file){
 
 	/* 시간 */
@@ -160,6 +165,57 @@ void printNewFile(char* file){
 
 	fclose(fpout);
 	/* 복사본 파일 만들기 끝 */
+
+	return;
+}
+
+// 팩스 출력
+void printFax(int shmidFax) {
+	
+	char *shmaddrFax = shmat(shmidFax, NULL, SHM_RDONLY);
+	int len = strlen(shmaddrFax);
+	int i = 0;
+	
+	char* shmaddr;
+	
+	// 시작구분선 출력
+	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
+	strcpy(shmaddr, "--------------------------\n");
+	shmdt((char*) shmaddr);
+	kill(getppid(), SIGPOLL);
+	usleep(70000);
+	
+
+	// 내용 출력.
+	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
+	strcpy(shmaddr, shmaddrFax);
+	shmdt((char*) shmaddr);
+	kill(getppid(), SIGPOLL);
+	usleep(70000);
+	
+	
+	/*
+	do {
+		wprintw(pLabelWin, "%c", *(shmaddrFax+i));
+		wrefresh(pLabelWin);
+		usleep(1000);
+		
+		
+		
+		usleep(70000);
+	} while (++i < len);
+	*/
+	
+	// 완료구분선 출력
+	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
+	strcpy(shmaddr, "--------------------------\nFax Reception Complete\n");
+	shmdt((char*) shmaddr);
+	kill(getppid(), SIGPOLL);
+	usleep(70000);
+	
+	// dettach and remove shared memory
+	shmdt(shmaddrFax);
+	shmctl(shmidFax, IPC_RMID, (struct shmid_ds *)NULL);
 
 	return;
 }
