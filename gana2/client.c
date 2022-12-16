@@ -93,11 +93,12 @@ void printerOn(void){
 // 프린터 끄기
 void printerOff(void){
 	print("printer off\n");
+	sleep(1);
 	
 	msgctl(msgid, IPC_RMID, (struct msqid_ds*) NULL); //메세지큐 삭제
 	shmctl(shmidPrinter, IPC_RMID, (struct shmid_ds*)NULL); //공유메모리 삭제
 	// 자식프세 종료시키기
-	kill(SIGKILL, printerPid);
+	kill(printerPid, SIGKILL);
 }
 	
 
@@ -394,6 +395,7 @@ int getFiles(char* files[]){
 	int cnt=0;
 	while((ent = readdir(dir)) != NULL){
 		
+		/*
 		if(strcmp(ent->d_name, ".") == 0){
 			continue;
 		}
@@ -405,6 +407,12 @@ int getFiles(char* files[]){
 		}
 		files[cnt] = ent->d_name;
 		cnt++;
+		*/
+		if(strstr(ent->d_name, ".txt") != NULL){
+			files[cnt] = ent->d_name;
+			cnt++;
+		}
+		
 	}
 
 
