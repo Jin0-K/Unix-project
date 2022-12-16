@@ -210,22 +210,37 @@ void printFax(int shmidFax) {
 	
 
 	// 내용 출력.
-	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
-	strcpy(shmaddr, shmaddrFax);
-	shmdt((char*) shmaddr);
-	kill(getppid(), SIGPOLL);
-	usleep(70000);
-	
-	
+	for(int i=0; i<len; i++){
+		shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
+		
+		shmaddr[0] = *(shmaddrFax+i);
+		shmaddr[1] = '\0';
+		
+		shmdt((char*) shmaddr);
+		kill(getppid(), SIGPOLL);
+		usleep(1000);
+	}
 	/*
 	do {
+		
 		wprintw(pLabelWin, "%c", *(shmaddrFax+i));
 		wrefresh(pLabelWin);
 		usleep(1000);
 		
 		
-		usleep(70000);
-	} while (++i < len);
+		shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
+		
+		char str[2];
+		strcpy(str, shmaddrFax+i);
+		str[1] = '\0';
+		i++;
+		
+		strcpy(shmaddr, str);
+		shmdt((char*) shmaddr);
+		kill(getppid(), SIGPOLL);
+		usleep(1000);
+	
+	} while (i < (len-1));
 	*/
 	
 	// 완료구분선 출력
