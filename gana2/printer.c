@@ -103,7 +103,7 @@ void printStdout(char* file){
 	strcpy(shmaddr, "--------------------------\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 	
 	// 파일 내용 출력
 	while(fgets(buf, BUFSIZ, fpin) != NULL){
@@ -112,7 +112,7 @@ void printStdout(char* file){
 		shmdt((char*) shmaddr);
 		kill(getppid(), SIGPOLL);
 		
-		usleep(30000);
+		usleep(70000);
 	}
 	
 	// 완료구분선 출력
@@ -122,7 +122,7 @@ void printStdout(char* file){
 	strcpy(shmaddr, completeBuf);
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 
 
 	// 파일 닫기
@@ -206,7 +206,7 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, "--------------------------\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 	
 
 	// 내용 출력.
@@ -214,7 +214,7 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, shmaddrFax);
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 	
 	
 	/*
@@ -233,7 +233,7 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, "--------------------------\nFax Reception Complete\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(50000);
+	usleep(70000);
 	
 	// dettach and remove shared memory
 	shmdt(shmaddrFax);
