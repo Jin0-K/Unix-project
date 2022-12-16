@@ -224,7 +224,6 @@ void printFax(int shmidFax) {
 		usleep(1000);
 		
 		
-		
 		usleep(70000);
 	} while (++i < len);
 	*/

@@ -93,7 +93,7 @@ void printerOn(void){
 // 프린터 끄기
 void printerOff(void){
 	print("printer off\n");
-	sleep(1);
+	//sleep(1);
 	
 	msgctl(msgid, IPC_RMID, (struct msqid_ds*) NULL); //메세지큐 삭제
 	shmctl(shmidPrinter, IPC_RMID, (struct shmid_ds*)NULL); //공유메모리 삭제
