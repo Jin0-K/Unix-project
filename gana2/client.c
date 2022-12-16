@@ -1,0 +1,876 @@
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/msg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <time.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <ncurses.h>
+#include "msgtype.h"
+#include "data.h"
+
+#define MAX_FILE 15
+
+void print(char* str);
+int SelectMenu(WINDOW* win, char* menu[], int size);
+void winResize(WINDOW* win, int h, int w);
+int getFiles(char* files[]);
+void wEraseWin(WINDOW* win, int y, int x);
+void printFax(int shmid);
+void printStdout(char* file);
+void printer(int signo);
+
+// Functions for fax
+void send_msg_printer(int signo);
+void create_msgq(); 
+void remove_msgq(); 
+/* void register_server(struct message *msg); */
+//int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file);
+int chooseFile(WINDOW *window, char **options, int optlen);
+void request_pids(struct message *msg);
+int receive_pids(struct message *message, pid_t *pids);
+int choosePid(WINDOW *window, int win_y, int win_x, pid_t *options, int optlen); 
+int put_file_shm(char *file, int *shmid, char *shmaddr);
+int send_fax(struct message *msg, pid_t receiver, int shmid);
+void unregister_server();
+
+WINDOW* pLabelWin; // 출력 라벨 윈도우
+int msgid; // Message queue for printer
+int shmidPrinter; // 공유메모리 식별자
+pid_t printerPid;
+int cli_keynum;
+int qid[2]; // Message queue for fax
+
+
+void printerHandler(int signo){
+	char* shmaddr = (char*)shmat(shmidPrinter, (char*)NULL, 0);
+	print(shmaddr);
+	shmdt((char*)shmaddr);
+}
+
+void tempHandler(int signo){
+	print("ffffffffffffffffffffffffffffffff\n");
+}
+
+void onPrinter(void){
+	print("printer on\n");
+	
+	// 메세지큐 생성
+        key_t keyM = ftok(keyfile, keynum);
+
+        msgid = msgget(keyM, IPC_CREAT|0664);
+        if(msgid == -1){
+                perror("msgget");
+                exit(1);
+        }
+	
+	// 공유메모리 연결
+	key_t keyS = ftok(shmfile, keynum);
+	shmidPrinter = shmget(keyS, keynum, IPC_CREAT|0644);
+	if(shmidPrinter == -1){
+		perror("shmget");
+		exit(1);
+	}
+	
+	char shmidbuf[5];
+	
+	switch(printerPid = fork()){
+		case -1:
+			perror("fork");
+			exit(1);
+			break;
+		case 0:
+			sprintf(shmidbuf, "%d", shmidPrinter);
+			execl("printer", "printer", shmidbuf, (char*)NULL);
+			exit(0);
+			break;
+	}
+	
+}
+
+void offPrinter(void){
+	print("printer off\n");
+	
+	msgctl(msgid, IPC_RMID, (struct msqid_ds*) NULL); //메세지큐 삭제
+	shmctl(shmidPrinter, IPC_RMID, (struct shmid_ds*)NULL); //공유메모리 삭제
+	// 자식프세 종료시키기
+	kill(9, printerPid);
+}
+	
+
+int main(void) {
+
+	initscr();
+	cbreak();
+	noecho();
+	
+	pid_t tempPid;	
+
+	// 창 크기 구하기
+	int yStd, xStd;
+	getmaxyx(stdscr, yStd, xStd);
+
+	// 마진 구하기
+	int xMargin = 5;
+	int yMargin = 4;
+
+	// 제목 출력
+	char* title = "Printer";
+	attron(A_BOLD);
+	mvprintw(1, (xStd-strlen(title))/2, "%s\n", title);
+	attroff(A_BOLD);
+	refresh();
+
+	// 메뉴 창 만들기
+	char* menu[] = {"Send Fax", "Print", "Print At New File", "Exit"};
+	int numOfMenu = sizeof(menu)/sizeof(menu[0]);
+	int menuH = numOfMenu + 2;
+	int menuW = xStd/3;
+	WINDOW* menuWin = newwin(menuH, menuW, yMargin, xMargin);
+	box(menuWin, 0, 0);
+	keypad(menuWin, true);
+	wrefresh(menuWin);
+	
+
+	// 출력창 만들기
+	int printH = yStd - 10;
+	int printW = xStd/2;
+	WINDOW* printWin = newwin(printH, printW, yMargin, xStd-xMargin-printW);
+	box(printWin, 0, 0);
+	wrefresh(printWin);
+
+	// 출력 라벨 만들기
+	int pLabelH = printH - 2;
+	int pLabelW = printW - 3;
+	pLabelWin = newwin(pLabelH, pLabelW, yMargin+1, xStd-xMargin-printW+2);
+	scrollok(pLabelWin, TRUE); //스크롤 가능
+	wrefresh(pLabelWin);
+	
+	// 시그널 등록
+	signal(SIGUSR1, printer);
+	signal(SIGUSR2, send_msg_printer);
+
+
+        // Create message queue for fax
+        create_msgq();
+        
+	struct message msgf;
+	// Initialize msgf
+	msgf.mtype = 1;
+	msgf.content = (struct cont) { 
+				.type = REGISTER, 
+				.pid = getpid(),
+				.qid = qid[0] };
+	// register in server
+	if (msgsnd(qid[1], (void *)&msgf, sizeof(struct message), 0) == -1) {
+		endwin();
+		perror("msgsnd");
+		exit(1);
+	}
+	
+	if (msgrcv(qid[0], &msgf, sizeof(struct message), 1, 0) < 0) {
+		endwin();
+		perror("msgrcv");
+		exit(1);
+	}
+	if (msgf.content.type == UNREGISTER) {
+		// remove message queue
+		remove_msgq();
+		endwin();
+		printf("Unable to register\n");
+		exit(1);
+	}
+
+	print("Connected to server\n");
+	
+	onPrinter();
+	signal(SIGPOLL, printerHandler);
+	signal(SIGTSTP, tempHandler);
+	
+
+	int choice;
+	while((choice = SelectMenu(menuWin, menu, numOfMenu)) != numOfMenu-1){ 
+	//메뉴 선택. 종료를 선택하지 않을 동안.
+
+		// File list
+		char* files[MAX_FILE];
+		int fileNum;
+		Msgbuf msg; // 메세지큐 버퍼
+		
+		print("select choice\n");
+
+		switch (choice) {
+			case 0: // 팩스
+				print(">> SEND FAX\n");
+				
+				// read files from the current directory
+				fileNum = getFiles(files);
+				// resize the menu box
+				wEraseWin(menuWin, menuH, menuW);
+				winResize(menuWin, fileNum + 4, menuW);
+				// Let the user choose which file to send
+				choice = chooseFile(menuWin, files, fileNum);
+				// reset menu box to original size
+				wEraseWin(menuWin, fileNum+3, menuW);
+				winResize(menuWin, menuH, menuW);
+				
+				if (choice == fileNum) { // if user cooses to cancel
+					print("Canceled to choose\n");
+					break;
+				}
+				
+				// Get pid list from server
+				pid_t pid_list[MAX_CLIENT - 1]; // pid list to print
+				int list_n = 0;
+				int rcvr_ind;
+				request_pids(&msgf);
+				list_n = receive_pids(&msgf, pid_list);
+				if (!list_n) {
+					print("There is no other client to send fax\n");
+					break;
+				}
+				// Let the user choose where to send
+				print("Choose where to send\n");
+				rcvr_ind = choosePid(menuWin, menuH, menuW, pid_list, list_n);
+				// Create shared memory to put file
+				int shmid;
+				char *addr;
+				if (put_file_shm(files[choice], &shmid, addr) == -1) {
+					break;
+				}
+				// send fax
+				if (send_fax(&msgf, pid_list[rcvr_ind], shmid) == -1) {
+					print("Unable to send message\n");
+				}
+				print("Fax Sent!\n");
+				
+				break;
+			case 1: // 출력
+				print(">> PRINT\n");
+			
+				// 파일 목록 가져오기	
+				fileNum = getFiles(files);
+				// 파일 개수만큼 메뉴창 크기 변경
+				wEraseWin(menuWin, menuH, menuW);
+				winResize(menuWin, fileNum+3, menuW);
+				// 출력할 파일 선택
+				choice = chooseFile(menuWin, files, fileNum);
+				// 원래 메뉴창으로 크기 변경
+				wEraseWin(menuWin, fileNum+3, menuW);
+				winResize(menuWin, menuH, menuW);
+				
+				if (choice == fileNum) { // if user cooses to cancel
+					print("Canceled to choose\n");
+					break;
+				}
+				print("choice: ");
+				print(files[choice]);
+				print("\n");
+
+
+                        	msg.mtype = STDOUT;
+				strcpy(msg.mtext, files[choice]);
+				msgsnd(msgid, (void*)&msg, SIZE, IPC_NOWAIT);
+				kill(printerPid, SIGUSR1);
+				
+				break;
+			case 2: // 파일에 출력
+				print(">> PRINT AT NEW FILE\n");
+
+	                       // 파일 목록 가져오기
+                               fileNum = getFiles(files);
+                               // 파일 개수만큼 메뉴창 크기 변경
+                               wEraseWin(menuWin, menuH, menuW);
+                               winResize(menuWin, fileNum+3, menuW);
+                               // 출력할 파일 선택
+                               choice = chooseFile(menuWin, files, fileNum);
+                               // 원래 메뉴창으로 크기 변경
+                               wEraseWin(menuWin, fileNum+3, menuW);
+                               winResize(menuWin, menuH, menuW);
+                                
+				if (choice == fileNum) { // if user cooses to cancel
+					print("Canceled to choose\n");
+					break;
+				}
+                               print("choice: ");
+                               print(files[choice]);
+                               print("\n");
+                               
+                               msg.mtype = NEWFILE;
+				strcpy(msg.mtext, files[choice]);
+				msgsnd(msgid, (void*)&msg, SIZE, IPC_NOWAIT);
+				kill(printerPid, SIGUSR1);
+
+				//printNewFile(files[choice]);
+				//winResize(menuWin, menuH+5, menuW);
+				
+				break;
+			default:
+				printw("deault");
+				refresh();
+				break;
+		}
+	}
+	
+
+	offPrinter();
+	unregister_server();
+	endwin();
+	
+
+	return 0;
+}
+
+// 메뉴 선택
+int SelectMenu(WINDOW* win, char* menu[], int size)
+{
+	int direction;
+	int highlight = 0;
+	int i;
+
+	box(win, 0, 0);
+	while(1){
+		for(i=0; i<size; i++){
+			if(i == highlight){
+				wattron(win, A_REVERSE);
+			}
+			wmove(win, i+1, 1);
+			wprintw(win, menu[i]);
+			wattroff(win, A_REVERSE);
+		}
+
+		direction = wgetch(win);
+
+		switch(direction){
+			case KEY_UP:
+				highlight--;
+				if(highlight < 0)
+					highlight = size-1;
+				break;
+				
+			case KEY_DOWN:
+				highlight++;
+				if(highlight > size-1)
+					highlight = 0;
+				break;
+
+			default:
+				break;
+		}
+
+		if(direction == 10) //엔터 치면 종료.
+			break;
+	}
+	
+	return highlight;
+}
+
+// 메뉴창 크기 변경
+void winResize(WINDOW* win, int h, int w){
+	box(win, ' ', ' ');
+	wrefresh(win);
+        wresize(win, h, w);
+        box(win, 0, 0);
+	wrefresh(win);
+}
+
+// 출력 label에 출력
+void print(char* str){
+	wrefresh(pLabelWin);
+	wprintw(pLabelWin, str);
+	wrefresh(pLabelWin);
+}
+
+// 파일 목록 불러오기
+int getFiles(char* files[]){
+	DIR* dir;
+	struct dirent* ent;
+
+	dir = opendir("./");
+	if(dir == NULL){
+		perror("opendir");
+		exit(1);
+	}
+	
+	int cnt=0;
+	while((ent = readdir(dir)) != NULL){
+		
+		if(strcmp(ent->d_name, ".") == 0){
+			continue;
+		}
+		else if(strcmp(ent->d_name, "..") == 0){
+			continue;
+		}
+		else if(strchr(ent->d_name, '.') == NULL){
+			continue;
+		}
+		files[cnt] = ent->d_name;
+		cnt++;
+	}
+
+
+	return cnt;
+}
+
+// 창 내용물 지우기
+void wEraseWin(WINDOW* win, int y, int x)
+{
+	wborder(win, ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
+	wrefresh(win);
+	
+	for(int i = 0; i <y; i++){
+		for(int j = 0; j<x; j++){
+			wmove(win, i, j);
+			waddch(win, ' ');
+		}
+	}
+	wrefresh(win);
+}
+
+void printFax(int shmid) {
+	char *shmaddr = shmat(shmid, NULL, SHM_RDONLY);
+	int len = strlen(shmaddr);
+	int i = 0;
+
+	print("--------------------------\n");
+	do {
+		wprintw(pLabelWin, "%c", *(shmaddr+i));
+		wrefresh(pLabelWin);
+		usleep(1000);
+	} while (++i < len);
+	print("--------------------------\n");
+	wprintw(pLabelWin, "Fax Reception Complete\n");
+	
+	// dettach and remove shared memory
+	shmdt(shmaddr);
+	shmctl(shmid, IPC_RMID, (struct shmid_ds *)NULL);
+
+	return;
+}
+
+void printStdout(char* file){
+	FILE* fpin;
+
+	fpin = fopen(file, "r");
+	if(fpin == NULL){
+		perror("fopen");
+		exit(1);
+	}
+
+	char buf[BUFSIZ];
+
+	print("--------------------------\n");
+	while(fgets(buf, BUFSIZ, fpin) != NULL){
+		print(buf);
+		usleep(10000);
+	}
+	print("--------------------------\n");
+	wprintw(pLabelWin, "Complete Print: %s\n", file);
+	wrefresh(pLabelWin);
+
+	return;
+}
+
+
+void printer(int signo){
+	// 메세지 큐 꺼내오기
+	// 큐 식별자에 따라 if문으로 나눠 다른 함수 실행하기
+	
+	// 메세지 큐에 내용이 없다면 함수 끝내기.
+	struct msqid_ds tmpbuf;
+	msgctl(msgid, IPC_STAT, &tmpbuf);
+	if(tmpbuf.msg_qnum <= 0){
+		printf("msg num: %ld\n", tmpbuf.msg_qnum);
+		return;
+	}	
+	
+	// 메세지큐 맨 앞의 내용 읽어오기
+	Msgbuf rcvMsg;
+	msgrcv(msgid, &rcvMsg, SIZE, 0, IPC_NOWAIT);
+	//wprintw(pLabelWin, "received msg: %s, type: %ld\n", rcvMsg.mtext, rcvMsg.mtype);
+	//wrefresh(pLabelWin);
+
+	// 타입별로 출력
+	switch(rcvMsg.mtype){
+		case NEWFILE:
+			//printNewFile(rcvMsg.mtext);
+			break;
+
+		case STDOUT:
+			kill(printerPid, SIGUSR1);
+			//printStdout(rcvMsg.mtext);
+			break;
+		case FAX:
+			print("Fax Received!\n");
+			printFax(atoi(rcvMsg.mtext));
+			break;
+	}
+}
+
+
+// operation when received GET_FAX
+/* Doesn't work for some unknown reason
+void sig_handler_getfax(int signo) {
+	void send_msg_printer(struct message *message);
+	struct message msg;
+	
+	// Receive message
+
+	msgrcv(qid[0], &msg, sizeof(msg.content), 1, 0);
+	wprintw(pLabelWin, "Received message size: %d\nReceived shmid: %d\n", 
+		sizeof(msg), sizeof(msg.content.qid));
+	send_msg_printer(&msg);
+	raise(SIGUSR1);
+	print("Signal Handler Done\n");
+}
+*/
+
+
+// Send the received message to printer
+void send_msg_printer(int signo) {
+	struct message msg_rcv;
+	Msgbuf msg_snd;
+	
+	// Receive message from server
+	msgrcv(qid[0], &msg_rcv, sizeof(struct message), 1, 0);
+	msg_snd.mtype = FAX;
+	sprintf(msg_snd.mtext, "%d", msg_rcv.content.qid);
+	
+	// send the message to printer message queue
+	if (msgsnd(msgid, (void *)&msg_snd, SIZE, IPC_NOWAIT) == -1) {
+		perror("msgsnd");
+	}
+	raise(SIGUSR1);
+}
+
+// create message queues
+void create_msgq() {
+	// message queue to receive message
+	cli_keynum = (int)getpid() % 253 + 2;
+	// don't let client key num value same as printer key num
+	if (cli_keynum == keynum) {
+		cli_keynum++;
+	}
+	// reset key_num if it already exists
+	while ((qid[0] = msgget(ftok(".", cli_keynum), IPC_CREAT|IPC_EXCL|0640)) < 0) {
+		if (++cli_keynum > 255) {
+			cli_keynum = 2;
+		}
+	}
+
+	// message queue to send message
+	if ((qid[1] = msgget(ftok(".", KEY_NUM), 0)) < 0) {
+		perror("msgget");
+		exit(1);
+	}
+
+}
+
+void remove_msgq() {
+	if (msgctl(qid[0], IPC_RMID, (struct msqid_ds *)NULL) == -1) {
+		printf("Error: Failed to delete message queue\n");
+	}
+}
+
+/* Server cannot receive message with this function (don't know why)
+// register in server
+void register_server(struct message *msg) {
+	msg->mtype = 1; // mtype will always be 1
+	msg->content = (struct cont) { 
+				.type = REGISTER, 
+				.pid = getpid(),
+				.qid = qid[0] };
+	if (msgsnd(qid[1], (void *)&msg, sizeof(struct message), 0) == -1) {
+		print("Failed to connect server\n");
+		return;
+	}
+	
+	int msg_len = msgrcv(qid[0], &msg, sizeof(struct message), 1, 0);
+	if (msg_len < 0) {
+		endwin();
+		perror("msgrcv");
+		exit(1);
+	}
+	if (msg->content.type == UNREGISTER) {
+		print("Unable to register\n");
+		// remove message queue
+		remove_msgq();
+		endwin();
+		exit(1);
+	}
+	print("Regesteration Successful\n");
+}
+*/
+
+/*
+// let the user choose which file to send
+// return the struct dirent of the file
+int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file) {
+	int get_files(DIR *dp, struct dirent **list);
+	int chooseFile(WINDOW *window, struct dirent **files, int fnum);
+	DIR *dir;
+	struct dirent *files[MAX_FILE]; // text file list
+	int file_num, file_ind;
+	
+
+	// open current directory
+	dir = opendir(".");
+	if(dir == NULL){
+		perror("opendir");
+		exit(1);
+	}
+
+	// get files
+	file_num = get_files(dir, files);
+	closedir(dir);
+
+	
+	// set the size of menu window as the number of files
+	wEraseWin(mWin, y, x);
+	winResize(mWin, file_num + 4, x);
+	// select file
+	file_ind = chooseFile(mWin, files, file_num);
+	
+	// exit if user canceled
+	if (file_ind == file_num) {
+		print("Canceled to choose\n");
+		wEraseWin(mWin, file_num+3, x);
+		winResize(mWin, y, x);
+		return -1;
+	}
+	
+	*file = *(files[file_ind]);
+	print("You've chosen ");
+	print(file->d_name);
+	print("\n");
+	
+	// reset the menu size	
+	wEraseWin(mWin, file_num+3, x);
+	winResize(mWin, y, x);
+	
+	
+	return 0;
+
+}
+
+int get_files(DIR *dp, struct dirent **list) {
+	struct dirent *dent;
+	int fnum = 0;
+	
+	while((dent = readdir(dp)) && (fnum < MAX_FILE)) {
+		if(strcmp(dent->d_name, ".") == 0){
+			continue;
+		}
+		else if(strcmp(dent->d_name, "..") == 0){
+			continue;
+		}
+		else if(strchr(dent->d_name, '.') == NULL){
+			continue;
+		}
+		*(list + fnum) = dent;
+		fnum++;
+	}
+	return fnum;
+}
+*/
+
+// Get an option input from user
+int chooseFile(WINDOW *window, char **options, int optlen) {
+	
+	int highlight = 0;
+	int i;
+	int direction;
+
+	box(window, 0, 0);
+
+	while (1) {
+		for (i = 0; i < optlen; i++) {
+			if (i == highlight) {
+				wattron(window, A_REVERSE);
+			}
+			wmove(window, i+1, 1);
+			wprintw(window, options[i]);
+			wattroff(window, A_REVERSE);
+		}
+		if (i == highlight) {
+			wattron(window, A_REVERSE);
+		}
+		wmove(window, i+1, 1);
+		wprintw(window, "CANCEL");
+		wattroff(window, A_REVERSE);
+		
+		direction = wgetch(window);
+
+		switch(direction){
+			case KEY_UP:
+				highlight--;
+				if(highlight < 0)
+					highlight = optlen;
+				break;
+				
+			case KEY_DOWN:
+				highlight++;
+				if(highlight > optlen)
+					highlight = 0;
+				break;
+
+			default:
+				break;
+		}
+
+		if(direction == 10) //엔터 치면 종료.
+			break;
+			
+	}	
+
+	return highlight;
+}	
+
+// send message to server to give pid list
+void request_pids(struct message *msg) {
+	msg->content.type = GET_PIDS;
+	msg->content.pid = getpid();
+	msg->content.qid = qid[0];
+	if (msgsnd(qid[1], (void *)msg, sizeof(struct message), 0) == -1) {
+		perror("msgsnd");
+		exit(1);
+	}
+}
+
+// Receive pid list from server
+int receive_pids(struct message *message, pid_t *pids) {
+	int msg_len;
+	int num = 0;
+	while(1) {
+		msg_len = msgrcv(qid[0], message, sizeof(struct message), 1, 0);
+		if (msg_len == -1) {
+			return -1;
+		}
+		if (message->content.type == GET_PIDS) {
+			if (message->content.pid == 0) {
+				break;
+			}
+			pids[num++] = message->content.pid;
+		}
+	}
+	return num;
+}
+
+
+int choosePid(WINDOW* window, int win_y, int win_x, pid_t* options, int optlen) {
+	int direction;
+	int highlight = 0;
+	int i;
+
+	// Set the window size
+	wEraseWin(window, win_y, win_x);
+	winResize(window, optlen+2, win_x);
+
+	while (1) {
+		for(i=0; i<optlen; i++){
+			if(i == highlight){
+				wattron(window, A_REVERSE);
+			}
+			wmove(window, i+1, 1);
+			wprintw(window, "%d", (int)options[i]);
+			wattroff(window, A_REVERSE);
+		}
+		
+		direction = wgetch(window);
+
+		switch(direction){
+			case KEY_UP:
+				highlight--;
+				if(highlight < 0)
+					highlight = optlen-1;
+				break;
+				
+			case KEY_DOWN:
+				highlight++;
+				if(highlight > optlen-1)
+					highlight = 0;
+				break;
+
+			default:
+				break;
+		}
+
+		if(direction == 10) //엔터 치면 종료.
+			break;
+	}
+	
+	// Reset the window size
+	wEraseWin(window, optlen+2, win_x);
+	winResize(window, win_y, win_x);
+
+	return highlight;
+}
+
+int put_file_shm(char *file, int *shmid, char *shmaddr) {
+	int fd;
+	struct stat statbuf;
+	
+	// Open file to share
+	if (stat(file, &statbuf) == -1) {
+		print("Error: stat failed\n");
+		return -1;
+	}
+	if ((fd = open(file, O_RDWR)) == -1) {
+		print("Error: unable to open file\n");
+		return -1;
+	}
+	
+	// assign memory
+	*shmid = shmget(ftok(".", cli_keynum), statbuf.st_size, IPC_CREAT|0666);
+	if (*shmid == -1) {
+		print("Error: Unable to create shared memory\n");
+		return -1;
+	}
+	shmaddr = shmat(*shmid, NULL, 0);
+	
+	// read file to put it in shared memory
+	if (read(fd, shmaddr, statbuf.st_size) == -1) {
+		print("Error: unable to read file\n");
+		return -1;
+	}
+	
+	close(fd);
+	
+	return 0;
+}
+
+// send message to server with shmid
+int send_fax(struct message *msg, pid_t receiver, int shmid) {
+	// set message
+	msg->content.type = SEND_FAX;
+	msg->content.pid = receiver;
+	msg->content.qid = shmid;
+
+	if (msgsnd(qid[1], (void *)msg, sizeof(struct message), 0) == -1) {
+		return -1;
+	}
+	return 0;
+}
+
+// end program
+void unregister_server() {
+        // remove message queue
+        remove_msgq();
+        // send message to server to unregister
+        struct message msg;
+        msg.mtype = 1;
+        msg.content.type = UNREGISTER;
+	msg.content.pid = getpid();
+	msg.content.qid = qid[0];
+        if (msgsnd(qid[1], (void *)&msg, sizeof(struct message), 0) == -1) {
+        	endwin();
+               perror("msgsnd");
+               exit(1);
+        }
+}
