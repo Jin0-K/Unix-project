@@ -22,16 +22,12 @@ int SelectMenu(WINDOW* win, char* menu[], int size);
 void winResize(WINDOW* win, int h, int w);
 int getFiles(char* files[]);
 void wEraseWin(WINDOW* win, int y, int x);
-void printFax(int shmid);
-void printStdout(char* file);
-void printer(int signo);
 
 // Functions for fax
 void send_msg_printer(int signo);
 void create_msgq(); 
 void remove_msgq(); 
-/* void register_server(struct message *msg); */
-//int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file);
+
 int chooseFile(WINDOW *window, char **options, int optlen);
 void request_pids(struct message *msg);
 int receive_pids(struct message *message, pid_t *pids);
@@ -41,24 +37,24 @@ int send_fax(struct message *msg, pid_t receiver, int shmid);
 void unregister_server();
 
 WINDOW* pLabelWin; // 출력 라벨 윈도우
-int msgid; // Message queue for printer
-int shmidPrinter; // 공유메모리 식별자
+int msgid; // 메시지큐 식별자 for printer
+int shmidPrinter; // 공유메모리 식별자 for printer
 pid_t printerPid;
 int cli_keynum;
 int qid[2]; // Message queue for fax
 
-
+// 프린터에서 출력해달라는 문자열 화면에 출력
 void printerHandler(int signo){
+	// 공유메모리 연결
 	char* shmaddr = (char*)shmat(shmidPrinter, (char*)NULL, 0);
+	// 공유메모리의 내용 출력
 	print(shmaddr);
+	// 공유메모리 연결 해제
 	shmdt((char*)shmaddr);
 }
 
-void tempHandler(int signo){
-	print("ffffffffffffffffffffffffffffffff\n");
-}
-
-void onPrinter(void){
+// 프린터 켜기
+void printerOn(void){
 	print("printer on\n");
 	
 	// 메세지큐 생성
@@ -70,7 +66,7 @@ void onPrinter(void){
                 exit(1);
         }
 	
-	// 공유메모리 연결
+	// 공유메모리 생성
 	key_t keyS = ftok(shmfile, keynum);
 	shmidPrinter = shmget(keyS, keynum, IPC_CREAT|0644);
 	if(shmidPrinter == -1){
@@ -79,7 +75,7 @@ void onPrinter(void){
 	}
 	
 	char shmidbuf[5];
-	
+	// 자식프로세스로 printer 생성
 	switch(printerPid = fork()){
 		case -1:
 			perror("fork");
@@ -94,13 +90,14 @@ void onPrinter(void){
 	
 }
 
-void offPrinter(void){
+// 프린터 끄기
+void printerOff(void){
 	print("printer off\n");
 	
 	msgctl(msgid, IPC_RMID, (struct msqid_ds*) NULL); //메세지큐 삭제
 	shmctl(shmidPrinter, IPC_RMID, (struct shmid_ds*)NULL); //공유메모리 삭제
 	// 자식프세 종료시키기
-	kill(9, printerPid);
+	kill(SIGKILL, printerPid);
 }
 	
 
@@ -109,8 +106,6 @@ int main(void) {
 	initscr();
 	cbreak();
 	noecho();
-	
-	pid_t tempPid;	
 
 	// 창 크기 구하기
 	int yStd, xStd;
@@ -153,8 +148,10 @@ int main(void) {
 	wrefresh(pLabelWin);
 	
 	// 시그널 등록
-	signal(SIGUSR1, printer);
 	signal(SIGUSR2, send_msg_printer);
+	signal(SIGPOLL, printerHandler);
+	
+	printerOn();
 
 
         // Create message queue for fax
@@ -189,13 +186,8 @@ int main(void) {
 
 	print("Connected to server\n");
 	
-	onPrinter();
 	
-	// 시그널 등록.
-	signal(SIGPOLL, printerHandler);
-	signal(SIGTSTP, tempHandler);
-	
-
+	// 메뉴 선택 반복
 	int choice;
 	while((choice = SelectMenu(menuWin, menu, numOfMenu)) != numOfMenu-1){ 
 	//메뉴 선택. 종료를 선택하지 않을 동안.
@@ -271,14 +263,16 @@ int main(void) {
 					print("Canceled to choose\n");
 					break;
 				}
+				
 				print("choice: ");
 				print(files[choice]);
 				print("\n");
 
-
+				// 출력할 파일 메세지큐에 넣기
                         	msg.mtype = STDOUT;
 				strcpy(msg.mtext, files[choice]);
 				msgsnd(msgid, (void*)&msg, SIZE, IPC_NOWAIT);
+				// 프린터로 시그널 보내서 출력하게하기
 				kill(printerPid, SIGUSR1);
 				
 				break;
@@ -304,14 +298,12 @@ int main(void) {
                                print(files[choice]);
                                print("\n");
                                
+                               // 복사할 파일 메세지큐에 넣기
                                msg.mtype = NEWFILE;
 				strcpy(msg.mtext, files[choice]);
 				msgsnd(msgid, (void*)&msg, SIZE, IPC_NOWAIT);
+				// 프린터로 시그널보내서 출력하게하기
 				kill(printerPid, SIGUSR1);
-
-				//printNewFile(files[choice]);
-				//winResize(menuWin, menuH+5, menuW);
-				
 				break;
 			default:
 				printw("deault");
@@ -321,11 +313,10 @@ int main(void) {
 	}
 	
 
-	offPrinter();
+	printerOff();
 	unregister_server();
 	endwin();
 	
-
 	return 0;
 }
 
@@ -435,109 +426,6 @@ void wEraseWin(WINDOW* win, int y, int x)
 	wrefresh(win);
 }
 
-void printFax(int shmid) {
-	char *shmaddr = shmat(shmid, NULL, SHM_RDONLY);
-	int len = strlen(shmaddr);
-	int i = 0;
-
-	print("--------------------------\n");
-	do {
-		wprintw(pLabelWin, "%c", *(shmaddr+i));
-		wrefresh(pLabelWin);
-		usleep(1000);
-	} while (++i < len);
-	print("--------------------------\n");
-	wprintw(pLabelWin, "Fax Reception Complete\n");
-	
-	// dettach and remove shared memory
-	shmdt(shmaddr);
-	shmctl(shmid, IPC_RMID, (struct shmid_ds *)NULL);
-
-	return;
-}
-
-void printStdout(char* file){
-	FILE* fpin;
-
-	fpin = fopen(file, "r");
-	if(fpin == NULL){
-		perror("fopen");
-		exit(1);
-	}
-
-	char buf[BUFSIZ];
-
-	print("--------------------------\n");
-	while(fgets(buf, BUFSIZ, fpin) != NULL){
-		print(buf);
-		usleep(10000);
-	}
-	print("--------------------------\n");
-	wprintw(pLabelWin, "Complete Print: %s\n", file);
-	wrefresh(pLabelWin);
-
-	return;
-}
-
-
-void printer(int signo){
-	/*
-	// 메세지 큐 꺼내오기
-	// 큐 식별자에 따라 if문으로 나눠 다른 함수 실행하기
-	
-	// 메세지 큐에 내용이 없다면 함수 끝내기.
-	struct msqid_ds tmpbuf;
-	msgctl(msgid, IPC_STAT, &tmpbuf);
-	if(tmpbuf.msg_qnum <= 0){
-		printf("msg num: %ld\n", tmpbuf.msg_qnum);
-		return;
-	}	
-	
-	// 메세지큐 맨 앞의 내용 읽어오기
-	Msgbuf rcvMsg;
-	msgrcv(msgid, &rcvMsg, SIZE, 0, IPC_NOWAIT);
-	//wprintw(pLabelWin, "received msg: %s, type: %ld\n", rcvMsg.mtext, rcvMsg.mtype);
-	//wrefresh(pLabelWin);
-	
-
-	// 타입별로 출력
-	switch(rcvMsg.mtype){
-		case NEWFILE:
-			//printNewFile(rcvMsg.mtext);
-			break;
-
-		case STDOUT:
-			kill(printerPid, SIGUSR1);
-			//printStdout(rcvMsg.mtext);
-			break;
-		case FAX:
-			print("Fax Received!\n");
-			printFax(atoi(rcvMsg.mtext));
-			break;
-	}
-	*/
-	print("fax recieved\n");
-	kill(printerPid, SIGUSR1);
-}
-
-
-// operation when received GET_FAX
-/* Doesn't work for some unknown reason
-void sig_handler_getfax(int signo) {
-	void send_msg_printer(struct message *message);
-	struct message msg;
-	
-	// Receive message
-
-	msgrcv(qid[0], &msg, sizeof(msg.content), 1, 0);
-	wprintw(pLabelWin, "Received message size: %d\nReceived shmid: %d\n", 
-		sizeof(msg), sizeof(msg.content.qid));
-	send_msg_printer(&msg);
-	raise(SIGUSR1);
-	print("Signal Handler Done\n");
-}
-*/
-
 
 // Send the received message to printer
 void send_msg_printer(int signo) {
@@ -553,7 +441,10 @@ void send_msg_printer(int signo) {
 	if (msgsnd(msgid, (void *)&msg_snd, SIZE, IPC_NOWAIT) == -1) {
 		perror("msgsnd");
 	}
-	raise(SIGUSR1);
+	
+	print("fax recieved\n");
+	kill(printerPid, SIGUSR1);
+	//raise(SIGUSR1);
 }
 
 // create message queues
@@ -585,107 +476,6 @@ void remove_msgq() {
 	}
 }
 
-/* Server cannot receive message with this function (don't know why)
-// register in server
-void register_server(struct message *msg) {
-	msg->mtype = 1; // mtype will always be 1
-	msg->content = (struct cont) { 
-				.type = REGISTER, 
-				.pid = getpid(),
-				.qid = qid[0] };
-	if (msgsnd(qid[1], (void *)&msg, sizeof(struct message), 0) == -1) {
-		print("Failed to connect server\n");
-		return;
-	}
-	
-	int msg_len = msgrcv(qid[0], &msg, sizeof(struct message), 1, 0);
-	if (msg_len < 0) {
-		endwin();
-		perror("msgrcv");
-		exit(1);
-	}
-	if (msg->content.type == UNREGISTER) {
-		print("Unable to register\n");
-		// remove message queue
-		remove_msgq();
-		endwin();
-		exit(1);
-	}
-	print("Regesteration Successful\n");
-}
-*/
-
-/*
-// let the user choose which file to send
-// return the struct dirent of the file
-int choose_file(WINDOW *pWin, WINDOW *mWin, int y, int x, struct dirent *file) {
-	int get_files(DIR *dp, struct dirent **list);
-	int chooseFile(WINDOW *window, struct dirent **files, int fnum);
-	DIR *dir;
-	struct dirent *files[MAX_FILE]; // text file list
-	int file_num, file_ind;
-	
-
-	// open current directory
-	dir = opendir(".");
-	if(dir == NULL){
-		perror("opendir");
-		exit(1);
-	}
-
-	// get files
-	file_num = get_files(dir, files);
-	closedir(dir);
-
-	
-	// set the size of menu window as the number of files
-	wEraseWin(mWin, y, x);
-	winResize(mWin, file_num + 4, x);
-	// select file
-	file_ind = chooseFile(mWin, files, file_num);
-	
-	// exit if user canceled
-	if (file_ind == file_num) {
-		print("Canceled to choose\n");
-		wEraseWin(mWin, file_num+3, x);
-		winResize(mWin, y, x);
-		return -1;
-	}
-	
-	*file = *(files[file_ind]);
-	print("You've chosen ");
-	print(file->d_name);
-	print("\n");
-	
-	// reset the menu size	
-	wEraseWin(mWin, file_num+3, x);
-	winResize(mWin, y, x);
-	
-	
-	return 0;
-
-}
-
-int get_files(DIR *dp, struct dirent **list) {
-	struct dirent *dent;
-	int fnum = 0;
-	
-	while((dent = readdir(dp)) && (fnum < MAX_FILE)) {
-		if(strcmp(dent->d_name, ".") == 0){
-			continue;
-		}
-		else if(strcmp(dent->d_name, "..") == 0){
-			continue;
-		}
-		else if(strchr(dent->d_name, '.') == NULL){
-			continue;
-		}
-		*(list + fnum) = dent;
-		fnum++;
-	}
-	return fnum;
-}
-*/
 
 // Get an option input from user
 int chooseFile(WINDOW *window, char **options, int optlen) {

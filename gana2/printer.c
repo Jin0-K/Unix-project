@@ -43,6 +43,7 @@ void print_handler(int signo){
 	switch(rcvMsg.mtype){
 		case NEWFILE:
 			printNewFile(rcvMsg.mtext);
+			sleep(2);
 			break;
 		case STDOUT:
 			printStdout(rcvMsg.mtext);
@@ -52,10 +53,36 @@ void print_handler(int signo){
 			printFax(atoi(rcvMsg.mtext));
 			sleep(2);
 			break;
-		default:
-			exit(1);
-			break;
 	}	
+}
+
+
+int main(int argc, char* argv[]){
+	
+	if(argc < 2){
+		perror("not enough argc");
+		exit(1);
+	}
+	
+	// 메세지 큐 
+	key_t key= ftok(keyfile, keynum);
+	if((msgid = msgget(key, 0)) < 0){
+		perror("msgget");
+		exit(1);
+	}
+	
+	// 공유메모리 식별자 얻기
+	shmid = atoi(argv[1]);
+
+	// 시그널 핸들러 등록
+	signal(SIGUSR1, print_handler);
+	
+	// 시그널 계속 기다림.
+	while(1){
+		pause();
+	}
+	
+	return 0;
 }
 
 // 화면에 출력
@@ -76,17 +103,16 @@ void printStdout(char* file){
 	strcpy(shmaddr, "--------------------------\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(70000);
+	usleep(50000);
 	
 	// 파일 내용 출력
 	while(fgets(buf, BUFSIZ, fpin) != NULL){
 		shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
 		strcpy(shmaddr, buf);
 		shmdt((char*) shmaddr);
-		//kill(getppid(), SIGTSTP);
 		kill(getppid(), SIGPOLL);
 		
-		usleep(70000);
+		usleep(30000);
 	}
 	
 	// 완료구분선 출력
@@ -96,7 +122,7 @@ void printStdout(char* file){
 	strcpy(shmaddr, completeBuf);
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(70000);
+	usleep(50000);
 
 
 	// 파일 닫기
@@ -108,11 +134,9 @@ void printStdout(char* file){
 // 복사본 만들기
 void printNewFile(char* file){
 
-	/* 시간 */
+	// 현재 시간
 	time_t tloc;
-
 	time(&tloc);
-	/* 시간 끝 */
 
 	/* 메모리 맵핑 */
 	int fd;
@@ -146,7 +170,6 @@ void printNewFile(char* file){
 	char* extension = (char*) malloc(sizeof(char) * strlen(str));
 	strcpy(extension, str);
 	extension = strchr(extension, '.');
-	//printf("ex: %s\n", extension);
 
 	char* newFileName = strtok(str, ".");
 
@@ -183,7 +206,7 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, "--------------------------\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(70000);
+	usleep(50000);
 	
 
 	// 내용 출력.
@@ -191,7 +214,7 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, shmaddrFax);
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(70000);
+	usleep(50000);
 	
 	
 	/*
@@ -211,7 +234,7 @@ void printFax(int shmidFax) {
 	strcpy(shmaddr, "--------------------------\nFax Reception Complete\n");
 	shmdt((char*) shmaddr);
 	kill(getppid(), SIGPOLL);
-	usleep(70000);
+	usleep(50000);
 	
 	// dettach and remove shared memory
 	shmdt(shmaddrFax);
@@ -220,34 +243,4 @@ void printFax(int shmidFax) {
 	return;
 }
 
-int main(int argc, char* argv[]){
 	
-	
-	if(argc < 2){
-		perror("not enough argc");
-		exit(1);
-	}
-	
-	// 메세지큐 
-	key_t key;
-
-	key = ftok(keyfile, keynum);
-	if((msgid = msgget(key, 0)) < 0){
-		perror("msgget");
-		exit(1);
-	}
-	
-	// 공유메모리
-	shmid = atoi(argv[1]);
-	
-	//printf("in printer");
-
-	// 시그널 핸들러 등록
-	signal(SIGUSR1, print_handler);
-	
-	while(1){
-		pause();
-	}
-	
-	return 0;
-}	
