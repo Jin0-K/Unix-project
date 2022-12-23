@@ -127,6 +127,8 @@ void printStdout(char* file){
 
 	// 파일 닫기
 	fclose(fpin);
+	// remove shared memory
+	shmctl(shmid, IPC_RMID, (struct shmid_ds *)NULL);
 	
 	return;
 }
@@ -187,6 +189,9 @@ void printNewFile(char* file){
 	fputs(addr, fpout);
 
 	fclose(fpout);
+	
+	// remove shared memory
+	shmctl(shmid, IPC_RMID, (struct shmid_ds *)NULL);
 	/* 복사본 파일 만들기 끝 */
 
 	return;
@@ -220,28 +225,6 @@ void printFax(int shmidFax) {
 		kill(getppid(), SIGPOLL);
 		usleep(1000);
 	}
-	/*
-	do {
-		
-		wprintw(pLabelWin, "%c", *(shmaddrFax+i));
-		wrefresh(pLabelWin);
-		usleep(1000);
-		
-		
-		shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
-		
-		char str[2];
-		strcpy(str, shmaddrFax+i);
-		str[1] = '\0';
-		i++;
-		
-		strcpy(shmaddr, str);
-		shmdt((char*) shmaddr);
-		kill(getppid(), SIGPOLL);
-		usleep(1000);
-	
-	} while (i < (len-1));
-	*/
 	
 	// 완료구분선 출력
 	shmaddr = (char*) shmat(shmid, (char*)NULL, 0);
